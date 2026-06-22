@@ -45,18 +45,6 @@ export class Renderer {
   private punchT = 0; // transient camera zoom punch 0..1
   shake = 0;
 
-  private charImages: Record<string, HTMLImageElement> = {};
-
-  private getCharImage(id: string): HTMLImageElement {
-    if (!this.charImages[id]) {
-      const img = new Image();
-      const filename = id === "the_accuser" ? "accuser.png" : `${id}.png`;
-      img.src = `/assets/characters/${filename}`;
-      this.charImages[id] = img;
-    }
-    return this.charImages[id];
-  }
-
   /** Set the equipped board so its colors, scripture and trail show in play. */
   setBoard(board: BoardDef) {
     this.board = board;
@@ -251,6 +239,7 @@ export class Renderer {
     this.drawSatan(ctx, engine, W, H, time, dt);
 
     this.drawPlayer(ctx, engine, character, W, H, time);
+    this.drawAccuserEyePeek(ctx, engine, W, H, time);
     this.drawMotes(ctx, W, H, time);
     this.drawParticles(ctx, dt);
     this.drawFloaters(ctx, dt);
@@ -280,7 +269,7 @@ export class Renderer {
     // Overdraw above the top edge so a living camera never reveals a gap.
     ctx.fillRect(-40, -40, W + 80, horizon * 1.35 + 40);
 
-    // Rising sun.
+    // Radiant horizon light — the destination is hope, calling, and Christ.
     const sunX = W / 2;
     const sunY = horizon * 0.96;
     const glow = ctx.createRadialGradient(sunX, sunY, 4, sunX, sunY, W * 0.32);
@@ -293,6 +282,21 @@ export class Renderer {
     ctx.beginPath();
     ctx.arc(sunX, sunY, W * 0.055, 0, Math.PI * 2);
     ctx.fill();
+
+    // Small, distant cross silhouette inside the glow. It should be reverent and
+    // readable, but never dominate the screen or turn the scene heavy-handed.
+    ctx.save();
+    ctx.globalAlpha = 0.42;
+    ctx.strokeStyle = "rgba(74,42,18,0.72)";
+    ctx.lineWidth = Math.max(1.2, W * 0.006);
+    ctx.lineCap = "round";
+    ctx.beginPath();
+    ctx.moveTo(sunX, sunY - W * 0.042);
+    ctx.lineTo(sunX, sunY + W * 0.032);
+    ctx.moveTo(sunX - W * 0.024, sunY - W * 0.012);
+    ctx.lineTo(sunX + W * 0.024, sunY - W * 0.012);
+    ctx.stroke();
+    ctx.restore();
 
     // Drifting clouds catching the dawn light.
     for (let i = 0; i < 4; i++) {
@@ -307,12 +311,12 @@ export class Renderer {
       }
     }
 
-    // Heaven-light rays sweeping slowly.
+    // Heaven-light rays sweeping slowly toward the player and across the lane.
     ctx.save();
     ctx.translate(sunX, sunY);
     ctx.globalAlpha = 0.1;
-    for (let i = 0; i < 5; i++) {
-      const a = -Math.PI / 2 + (i - 2) * 0.42 + Math.sin(time * 0.18 + i) * 0.05;
+    for (let i = 0; i < 8; i++) {
+      const a = -Math.PI / 2 + (i - 3.5) * 0.28 + Math.sin(time * 0.18 + i) * 0.045;
       ctx.save();
       ctx.rotate(a);
       const ray = ctx.createLinearGradient(0, 0, 0, -H);
@@ -322,8 +326,8 @@ export class Renderer {
       ctx.beginPath();
       ctx.moveTo(-W * 0.015, 0);
       ctx.lineTo(W * 0.015, 0);
-      ctx.lineTo(W * 0.09, -H);
-      ctx.lineTo(-W * 0.09, -H);
+      ctx.lineTo(W * 0.12, -H);
+      ctx.lineTo(-W * 0.12, -H);
       ctx.closePath();
       ctx.fill();
       ctx.restore();
@@ -376,6 +380,22 @@ export class Renderer {
     ctx.lineTo(W * 0.32, H);
     ctx.closePath();
     ctx.fill();
+
+    // Layered horizontal reflection strokes give the ocean a premium mobile-game
+    // shimmer without adding image assets or expensive shaders.
+    ctx.globalAlpha = 0.28;
+    ctx.lineCap = "round";
+    for (let i = 0; i < 18; i++) {
+      const yy = horizon + 18 + i * ((H - horizon) / 20);
+      const ww = W * (0.06 + i * 0.012);
+      const wobble = Math.sin(time * 1.4 + i * 1.7) * W * 0.015;
+      ctx.strokeStyle = i % 3 === 0 ? "rgba(255,239,176,0.42)" : "rgba(255,255,255,0.18)";
+      ctx.lineWidth = Math.max(1, 2.2 - i * 0.04);
+      ctx.beginPath();
+      ctx.moveTo(W / 2 - ww + wobble, yy);
+      ctx.lineTo(W / 2 + ww + wobble, yy + Math.sin(time * 2 + i) * 2);
+      ctx.stroke();
+    }
 
     // Water light caustics (subtle ripple patterns)
     ctx.globalAlpha = 0.08;
@@ -632,10 +652,11 @@ export class Renderer {
       }
     }
 
-    // Lane divider lines — glow more intensely under Holy Sprint / Kingdom Surge.
+    // Lane divider lines — clear, premium gold lane readability without changing
+    // gameplay lanes or collision logic.
     const rushing = engine.sprintTimer > 0 || engine.surgeTimer > 0;
-    const edgeAlpha = rushing ? 0.95 : 0.75;
-    const midAlpha = rushing ? 0.55 : 0.28;
+    const edgeAlpha = rushing ? 0.98 : 0.82;
+    const midAlpha = rushing ? 0.68 : 0.38;
     for (const laneEdge of [-0.5, 0.5, 1.5, 2.5]) {
       ctx.beginPath();
       const far = this.project(laneEdge, SPAWN_Z, W, H);
@@ -644,13 +665,31 @@ export class Renderer {
         const pt = this.project(laneEdge, z, W, H);
         ctx.lineTo(pt.x, pt.y);
       }
-      ctx.strokeStyle =
-        laneEdge === -0.5 || laneEdge === 2.5
-          ? `rgba(255,214,102,${edgeAlpha})`
-          : `rgba(255,240,200,${midAlpha})`;
-      ctx.lineWidth = laneEdge === -0.5 || laneEdge === 2.5 ? 3 : 2;
+      const isOuter = laneEdge === -0.5 || laneEdge === 2.5;
+      ctx.shadowBlur = isOuter ? 12 : 6;
+      ctx.shadowColor = "rgba(255,214,102,0.75)";
+      ctx.strokeStyle = isOuter
+        ? `rgba(255,214,102,${edgeAlpha})`
+        : `rgba(255,240,200,${midAlpha})`;
+      ctx.lineWidth = isOuter ? 3.4 : 2.2;
       ctx.stroke();
+      ctx.shadowBlur = 0;
     }
+
+    // Thin central light path points the eye toward the horizon/cross and makes
+    // the boardwalk feel like it is leading the runner into hope.
+    const pathGlow = ctx.createLinearGradient(0, horizon, 0, H);
+    pathGlow.addColorStop(0, "rgba(255,246,205,0.28)");
+    pathGlow.addColorStop(0.45, "rgba(255,214,102,0.16)");
+    pathGlow.addColorStop(1, "rgba(255,214,102,0.02)");
+    ctx.fillStyle = pathGlow;
+    ctx.beginPath();
+    ctx.moveTo(W * 0.485, horizon);
+    ctx.lineTo(W * 0.515, horizon);
+    ctx.lineTo(W * 0.57, H + 30);
+    ctx.lineTo(W * 0.43, H + 30);
+    ctx.closePath();
+    ctx.fill();
   }
 
   private drawPalms(ctx: CanvasRenderingContext2D, W: number, H: number, dist: number) {
@@ -1083,7 +1122,18 @@ export class Renderer {
     const slide = engine.sliding > 0;
     const airborne = engine.y > 0.2;
     const runPhase = engine.stats.distance * 1.9;
-    const bounce = airborne || slide ? 0 : Math.abs(Math.sin(runPhase)) * 3;
+
+    // Visual-only life pass: keep gameplay physics/hitboxes untouched, but anchor
+    // the rendered body by its feet so full-body PNGs face forward into the lane
+    // instead of floating/tilting from an arbitrary torso origin.
+    const runStep = Math.sin(runPhase);
+    const runBob = airborne || slide ? 0 : Math.abs(runStep) * 3.5;
+    const visualFootY = baseY + 13 - runBob;
+    const laneDelta = Math.max(-1, Math.min(1, engine.lane - engine.laneX));
+    const laneLean = laneDelta * 0.16;
+    const runLean = airborne || slide ? 0 : runStep * 0.025;
+    const jumpLean = airborne ? -0.035 : 0;
+    const slideLean = slide ? -0.09 : 0;
 
     ctx.save();
 
@@ -1200,65 +1250,36 @@ export class Renderer {
 
     // ---- Draw character body with unique personality ----
     // HERO SCALE: the runner is a proper hero, occupying real screen space.
-    // Feet stay planted as the body grows (anchor at local foot y ≈ 13).
+    // The transform now pivots around the local foot point (y≈13), which keeps
+    // the feet planted on the lane/board while all motion remains render-only.
     const HERO = 2.7;
-    ctx.translate(p.x, baseY - bounce);
-    ctx.translate(0, 13 * (1 - HERO));
-    ctx.rotate(slide ? 0 : -0.06);
-    ctx.lineCap = "round";
 
-    // Squash and stretch animation
     let scaleX = 1;
     let scaleY = 1;
     if (airborne) {
-      // Anticipation: compress before jump, stretch in air
-      const jumpPhase = Math.min(1, bounce / 60); // normalized 0..1
-      if (jumpPhase < 0.3) {
-        // Compression phase (first 30% of jump)
-        scaleY = 1 - (0.3 - jumpPhase) * 0.15; // compress to 0.85
-        scaleX = 1 + (0.3 - jumpPhase) * 0.1;  // stretch horizontally
-      } else {
-        // Air phase
-        scaleY = 1.05;
-        scaleX = 0.95;
-      }
+      const jumpPhase = Math.max(0, Math.min(1, engine.y / 2.4));
+      scaleY = 1.04 + jumpPhase * 0.035;
+      scaleX = 0.97 - jumpPhase * 0.015;
     } else if (slide) {
-      // Slide: compress vertically, stretch horizontally
-      scaleY = 0.7;
-      scaleX = 1.25;
+      scaleY = 0.72;
+      scaleX = 1.18;
     } else {
-      // Running: subtle squash/stretch with running cycle
-      const stretchFactor = Math.abs(Math.sin(runPhase) * 0.08);
-      scaleY = 1 - stretchFactor * 0.5;
-      scaleX = 1 + stretchFactor * 0.3;
+      const breath = Math.sin(runPhase * 2) * 0.025;
+      scaleY = 1 + breath;
+      scaleX = 1 - breath * 0.65;
     }
 
+    ctx.translate(p.x, visualFootY);
+    ctx.rotate(laneLean + runLean + jumpLean + slideLean);
     ctx.scale(scaleX * HERO, scaleY * HERO);
+    ctx.translate(0, -13);
+    ctx.lineCap = "round";
 
-    // Call character-specific renderer
-    const img = this.getCharImage(ch.id);
-    if (img.complete && img.naturalWidth > 0) {
-      const height = 48;
-      const width = height * (img.naturalWidth / img.naturalHeight);
-      ctx.drawImage(img, -width / 2, -35, width, height);
-    } else {
-      switch (ch.id) {
-        case "zion":
-          this.drawZion(ctx, ch, time, runPhase, airborne, slide);
-          break;
-        case "grace":
-          this.drawGrace(ctx, ch, time, runPhase, airborne, slide);
-          break;
-        case "judah":
-          this.drawJudah(ctx, ch, time, runPhase, airborne, slide);
-          break;
-        case "kai":
-          this.drawKai(ctx, ch, time, runPhase, airborne, slide);
-          break;
-        default:
-          this.drawZion(ctx, ch, time, runPhase, airborne, slide);
-      }
-    }
+    // Gameplay must read as a chase camera: the hero runs AWAY from the player
+    // toward the golden horizon. The current character PNGs are front-facing
+    // portrait art, so gameplay uses a clean color-matched back-facing runner
+    // silhouette instead of mirroring/distorting those assets.
+    this.drawBackFacingRunner(ctx, ch, runPhase, airborne, slide);
 
     ctx.restore();
     ctx.save();
@@ -1332,6 +1353,155 @@ export class Renderer {
       ctx.ellipse(p.x, baseY - 112, 16, 5, 0, 0, Math.PI * 2);
       ctx.stroke();
     }
+
+    ctx.restore();
+  }
+
+  /** Back-facing runner used during gameplay so the chase camera always feels right. */
+  private drawBackFacingRunner(
+    ctx: CanvasRenderingContext2D,
+    ch: CharacterDef,
+    runPhase: number,
+    airborne: boolean,
+    slide: boolean,
+  ) {
+    const primary = ch.colors.primary;
+    const secondary = ch.colors.secondary;
+    const skin = ch.colors.skin;
+    // Keep the older procedural front-view renderers referenced as emergency
+    // fallbacks for development, while the actual Phase 1 gameplay path stays
+    // strictly back-facing.
+    if (ch.id === "__legacy_front_debug__") {
+      this.drawZion(ctx, ch, 0, runPhase, airborne, slide);
+      this.drawGrace(ctx, ch, 0, runPhase, airborne, slide);
+      this.drawJudah(ctx, ch, 0, runPhase, airborne, slide);
+      this.drawKai(ctx, ch, 0, runPhase, airborne, slide);
+    }
+    const hair = ch.id === "grace" || ch.id === "esther" ? "#3a2418" : ch.id === "kai" ? "#1f2937" : "#2b2118";
+    const stride = Math.sin(runPhase);
+    const counter = Math.sin(runPhase + Math.PI);
+    const lift = airborne ? -4 : Math.abs(Math.cos(runPhase)) * 2.5;
+
+    ctx.save();
+    ctx.lineCap = "round";
+    ctx.lineJoin = "round";
+
+    if (slide) {
+      // Low, readable slide from behind — compact silhouette, not a face-forward dive.
+      ctx.rotate(-0.18);
+      ctx.fillStyle = primary;
+      ctx.beginPath();
+      ctx.roundRect(-18, -18, 36, 18, 8);
+      ctx.fill();
+      ctx.fillStyle = hair;
+      ctx.beginPath();
+      ctx.arc(14, -22, 8, 0, Math.PI * 2);
+      ctx.fill();
+      ctx.fillStyle = secondary;
+      ctx.fillRect(-14, -8, 28, 3);
+      ctx.restore();
+      return;
+    }
+
+    // Legs: bigger nearer feet, natural alternating stride away from camera.
+    for (const dir of [-1, 1]) {
+      const phase = dir === 1 ? stride : counter;
+      const hipX = dir * 7;
+      const kneeX = hipX + phase * 6;
+      const kneeY = -15 + Math.max(0, -phase) * 3;
+      const footX = hipX + phase * 12;
+      const footY = 8 - Math.max(0, phase) * 5 + lift;
+      ctx.strokeStyle = this.darken(primary);
+      ctx.lineWidth = 7.2;
+      ctx.beginPath();
+      ctx.moveTo(hipX, -28);
+      ctx.lineTo(kneeX, kneeY);
+      ctx.lineTo(footX, footY);
+      ctx.stroke();
+      ctx.fillStyle = "#f8fafc";
+      ctx.beginPath();
+      ctx.ellipse(footX, footY + 2, 7, 3.3, phase * 0.18, 0, Math.PI * 2);
+      ctx.fill();
+      ctx.fillStyle = secondary;
+      ctx.fillRect(footX - 5, footY + 3, 10, 1.7);
+    }
+
+    // Torso/back: broad shoulder shape and center spine highlight communicate rear view.
+    const torsoGrad = ctx.createLinearGradient(0, -72, 0, -24);
+    torsoGrad.addColorStop(0, this.lighten(primary));
+    torsoGrad.addColorStop(1, this.darken(primary));
+    ctx.fillStyle = torsoGrad;
+    ctx.beginPath();
+    ctx.moveTo(-16, -66);
+    ctx.quadraticCurveTo(0, -76, 16, -66);
+    ctx.quadraticCurveTo(19, -48, 12, -28);
+    ctx.quadraticCurveTo(0, -22, -12, -28);
+    ctx.quadraticCurveTo(-19, -48, -16, -66);
+    ctx.closePath();
+    ctx.fill();
+    ctx.strokeStyle = this.rgba(secondary, 0.95);
+    ctx.lineWidth = 2.1;
+    ctx.beginPath();
+    ctx.moveTo(0, -66);
+    ctx.quadraticCurveTo(2, -52, 0, -30);
+    ctx.stroke();
+
+    // Arms pump back beside the body, never reaching toward the camera.
+    for (const dir of [-1, 1]) {
+      const phase = dir === 1 ? counter : stride;
+      const shX = dir * 15;
+      const elbowX = shX + dir * 8 + phase * 4;
+      const elbowY = -50 + phase * 7;
+      const handX = elbowX + dir * 2;
+      const handY = -34 - phase * 5;
+      ctx.strokeStyle = primary;
+      ctx.lineWidth = 6.5;
+      ctx.beginPath();
+      ctx.moveTo(shX, -61);
+      ctx.lineTo(elbowX, elbowY);
+      ctx.lineTo(handX, handY);
+      ctx.stroke();
+      ctx.fillStyle = skin;
+      ctx.beginPath();
+      ctx.arc(handX, handY, 3.6, 0, Math.PI * 2);
+      ctx.fill();
+    }
+
+    // Neck/head from behind with hair cap; no facial features, no awkward rotation.
+    ctx.fillStyle = skin;
+    ctx.beginPath();
+    ctx.roundRect(-5, -78, 10, 10, 4);
+    ctx.fill();
+    ctx.fillStyle = skin;
+    ctx.beginPath();
+    ctx.arc(0, -91, 12, 0, Math.PI * 2);
+    ctx.fill();
+    ctx.fillStyle = hair;
+    ctx.beginPath();
+    ctx.arc(0, -95, 12.5, Math.PI, Math.PI * 2);
+    ctx.quadraticCurveTo(11, -87, 7, -80);
+    ctx.quadraticCurveTo(0, -84, -7, -80);
+    ctx.quadraticCurveTo(-11, -87, -12.5, -95);
+    ctx.fill();
+
+    // Character-specific back detail for collectible identity.
+    ctx.fillStyle = this.rgba(secondary, 0.95);
+    ctx.font = "900 9px Nunito, sans-serif";
+    ctx.textAlign = "center";
+    ctx.textBaseline = "middle";
+    const mark = ch.id === "zion" ? "✦" : ch.id === "grace" ? "✿" : ch.id === "judah" ? "♛" : ch.id === "kai" ? "≈" : "✧";
+    ctx.fillText(mark, 0, -48);
+
+    // Subtle rim light from the horizon on shoulders/head.
+    ctx.strokeStyle = "rgba(255,236,170,0.72)";
+    ctx.lineWidth = 1.4;
+    ctx.beginPath();
+    ctx.arc(0, -91, 13.5, Math.PI * 1.05, Math.PI * 1.95);
+    ctx.stroke();
+    ctx.beginPath();
+    ctx.moveTo(-14, -66);
+    ctx.quadraticCurveTo(0, -74, 14, -66);
+    ctx.stroke();
 
     ctx.restore();
   }
@@ -1532,7 +1702,7 @@ export class Renderer {
 
   // ---- Character-specific renderers ----
 
-  private drawZion(
+  drawZion(
     ctx: CanvasRenderingContext2D,
     ch: CharacterDef,
     _time: number,
@@ -1656,7 +1826,7 @@ export class Renderer {
     }
   }
 
-  private drawGrace(
+  drawGrace(
     ctx: CanvasRenderingContext2D,
     ch: CharacterDef,
     _time: number,
@@ -1780,7 +1950,7 @@ export class Renderer {
     }
   }
 
-  private drawJudah(
+  drawJudah(
     ctx: CanvasRenderingContext2D,
     ch: CharacterDef,
     _time: number,
@@ -1918,7 +2088,7 @@ export class Renderer {
     }
   }
 
-  private drawKai(
+  drawKai(
     ctx: CanvasRenderingContext2D,
     ch: CharacterDef,
     time: number,
@@ -2059,11 +2229,13 @@ export class Renderer {
     // and falls back / shrinks when the player gains ground (power-ups).
     const prox = engine.satan;
     const rise = Math.max(0.15, Math.min(1, prox)); // always at least a looming hint
-    // He stays a smaller, distant figure UP the track until he genuinely
-    // closes in (quadratic ramp), so he never merges with the bright hero.
-    const S = 22 + Math.pow(rise, 1.5) * 80; // far: ~22px unit; close: ~102px
-    const cx = W / 2 + Math.sin(time * 1.05) * W * 0.05;
-    const footY = H * 0.42 + rise * rise * (H * 0.44); // far: up-track; close: at hero
+    // He stays behind the runner from the chase-camera perspective and only
+    // becomes more readable when pressure rises, so the light remains the hero.
+    // He belongs BEHIND the runner from the chase-camera perspective: low/near
+    // the camera, never standing between the child and the horizon light.
+    const S = 16 + Math.pow(rise, 1.5) * 56; // far: subtle; close: readable threat
+    const cx = W / 2 - rise * W * 0.1 + Math.sin(time * 1.05) * W * 0.035;
+    const footY = H * (1.05 - rise * 0.18); // far: mostly off-screen; close: behind hero
 
     const runC = time * (5 + rise * 5); // strides quicken as he closes
     const legSwing = Math.sin(runC);
@@ -2077,11 +2249,11 @@ export class Renderer {
 
     ctx.save();
 
-    // Hellish aura behind the figure.
+    // Distant spiritual-opposition aura: readable pressure, not horror/gore.
     const aura = ctx.createRadialGradient(cx, midY, S * 0.2, cx, midY, S * 3.2);
-    aura.addColorStop(0, `rgba(190,20,30,${0.2 * rise})`);
-    aura.addColorStop(0.5, `rgba(120,10,40,${0.11 * rise})`);
-    aura.addColorStop(1, "rgba(80,0,30,0)");
+    aura.addColorStop(0, `rgba(85,35,120,${0.16 * rise})`);
+    aura.addColorStop(0.5, `rgba(30,20,70,${0.12 * rise})`);
+    aura.addColorStop(1, "rgba(20,10,55,0)");
     ctx.fillStyle = aura;
     ctx.fillRect(cx - S * 3.2, midY - S * 3.2, S * 6.4, S * 6.4);
 
@@ -2198,25 +2370,16 @@ export class Renderer {
     ctx.closePath();
     ctx.fill();
 
-    // Horns.
-    for (const d of [-1, 1]) {
-      ctx.beginPath();
-      ctx.moveTo(cx + d * S * 0.3, headY - S * 0.35);
-      ctx.quadraticCurveTo(cx + d * S * 0.78, headY - S * 0.95, cx + d * S * 0.5, headY - S * 1.18);
-      ctx.quadraticCurveTo(cx + d * S * 0.5, headY - S * 0.7, cx + d * S * 0.22, headY - S * 0.45);
-      ctx.closePath();
-      ctx.fill();
-    }
-
-    // Glowing red eyes with a heartbeat pulse.
+    // Glowing eyes with a heartbeat pulse. The silhouette stays family-friendly:
+    // no horns, gore, grotesque anatomy, or horror-monster detail.
     const eyeY = headY - S * 0.02;
     const beat = 0.6 + 0.4 * Math.sin(time * 6);
     for (const d of [-1, 1]) {
       const ex = cx + d * S * 0.2;
       const g = ctx.createRadialGradient(ex, eyeY, 1, ex, eyeY, S * 0.32);
-      g.addColorStop(0, `rgba(255,130,90,${beat})`);
-      g.addColorStop(0.4, `rgba(230,40,30,${beat * 0.6})`);
-      g.addColorStop(1, "rgba(200,20,20,0)");
+      g.addColorStop(0, `rgba(255,170,95,${beat})`);
+      g.addColorStop(0.4, `rgba(245,92,70,${beat * 0.55})`);
+      g.addColorStop(1, "rgba(180,60,90,0)");
       ctx.fillStyle = g;
       ctx.beginPath();
       ctx.arc(ex, eyeY, S * 0.32, 0, Math.PI * 2);
@@ -2227,8 +2390,8 @@ export class Renderer {
       ctx.fill();
     }
 
-    // Red rim light to separate the silhouette from the sky.
-    ctx.strokeStyle = `rgba(220,40,60,${0.45 + 0.3 * Math.sin(time * 6)})`;
+    // Purple-red rim light separates the silhouette from the golden sky.
+    ctx.strokeStyle = `rgba(165,86,247,${0.38 + 0.24 * Math.sin(time * 6)})`;
     ctx.lineWidth = 2;
     ctx.beginPath();
     ctx.arc(cx, headY, S * 0.5, Math.PI * 0.15, Math.PI * 0.85);
@@ -2278,6 +2441,34 @@ export class Renderer {
     ctx.shadowBlur = 0;
     ctx.restore();
     this.satanScrolls = this.satanScrolls.filter((s) => s.life > 0 && s.y < H + 40);
+  }
+
+  /** Tiny eye glints peeking from behind the runner when the Accuser is close. */
+  private drawAccuserEyePeek(ctx: CanvasRenderingContext2D, engine: GameEngine, W: number, H: number, time: number) {
+    const pressure = Math.max(0, (engine.satan - 0.45) / 0.55);
+    if (pressure <= 0.02) return;
+    const p = this.project(engine.laneX, 0, W, H);
+    const baseY = p.y - engine.y * H * 0.055;
+    const eyeY = baseY - 86 + Math.sin(time * 5) * 1.5;
+    const eyeX = p.x - 46 - pressure * 16;
+    const beat = 0.62 + 0.38 * Math.sin(time * 6);
+    ctx.save();
+    for (const d of [-1, 1]) {
+      const ex = eyeX + d * 7;
+      const glow = ctx.createRadialGradient(ex, eyeY, 1, ex, eyeY, 15 + pressure * 10);
+      glow.addColorStop(0, `rgba(255,210,126,${0.72 * beat * pressure})`);
+      glow.addColorStop(0.45, `rgba(245,92,70,${0.5 * beat * pressure})`);
+      glow.addColorStop(1, "rgba(180,60,90,0)");
+      ctx.fillStyle = glow;
+      ctx.beginPath();
+      ctx.arc(ex, eyeY, 15 + pressure * 10, 0, Math.PI * 2);
+      ctx.fill();
+      ctx.fillStyle = `rgba(255,235,190,${0.9 * pressure})`;
+      ctx.beginPath();
+      ctx.ellipse(ex, eyeY, 2.2 + pressure * 1.4, 1.4 + pressure, 0, 0, Math.PI * 2);
+      ctx.fill();
+    }
+    ctx.restore();
   }
 
   // ---- Effects -------------------------------------------------------------

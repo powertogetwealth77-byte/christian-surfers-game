@@ -25,7 +25,7 @@ Open **http://localhost:5173** and run.
 
 ## Features
 
-- **4 playable runners** — Zion, Grace, Judah, Kai — each with a unique
+- **6 playable runners** — Zion, Grace, Esther, Judah, Kai, David — each with a unique
   faith-based ability that changes gameplay
 - **Satan the Accuser** chases from behind with a live distance meter,
   heartbeat warnings, dark vignette, and screen shake at near-catch moments

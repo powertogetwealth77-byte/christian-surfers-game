@@ -110,7 +110,22 @@ export default function App() {
           {screen === "characters" && (
             <CharacterSelectScreen
               save={save}
-              onSelect={(id) => updateSave({ selectedCharacter: id })}
+              onEquip={(id) => updateSave({ selectedCharacter: id })}
+              onPurchase={(id, cost, autoEquip = true) => {
+                let purchased = false;
+                setSave((s) => {
+                  if (s.ownedCharacters.includes(id) || s.totalCoins < cost) return s;
+                  purchased = true;
+                  const ownedCharacters = [...new Set([...s.ownedCharacters, id])];
+                  return {
+                    ...s,
+                    totalCoins: s.totalCoins - cost,
+                    ownedCharacters,
+                    selectedCharacter: autoEquip ? id : s.selectedCharacter,
+                  };
+                });
+                return purchased;
+              }}
               onBack={() => setScreen("start")}
               onPlay={() => setScreen("game")}
             />

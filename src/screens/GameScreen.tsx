@@ -310,6 +310,15 @@ export function GameScreen({
               caughtAt = time;
               break;
             case "stumble":
+              sound.play("shieldBreak");
+              renderer.triggerScreenFlash("#f5d76e", 0.28);
+              renderer.ringBurst(engine, W, H, "#f5d76e", 10);
+              pushPopup({
+                kind: "power",
+                title: "👑 ROYAL FAVOR",
+                body: "Esther preserved your streak and kept you running.",
+              });
+              break;
             case "satanWarning":
               break;
           }

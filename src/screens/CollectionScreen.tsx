@@ -80,7 +80,7 @@ export function CollectionScreen({
                   </span>
                 </div>
                 <p className="mt-1 text-[11px] italic text-white/55">{ch.bio}</p>
-                <p className="mt-1 text-[11px] text-white/70">📖 {ch.favoriteScripture} · ✨ {ch.signaturePower}</p>
+                <p className="mt-1 text-[11px] text-white/70">📖 {ch.scripture} · ✨ {ch.signaturePower}</p>
               </motion.div>
             );
           })}
