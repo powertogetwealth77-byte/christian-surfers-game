@@ -48,11 +48,13 @@ export type Rarity = "common" | "rare" | "epic" | "legendary" | "kingdom";
 export interface CharacterDef {
   id: string;
   name: string;
+  title: string;
   outfit: string;
   clothingText: string;
   theme: string;
   ability: string;
   abilityDesc: string;
+  price: number;
   colors: {
     primary: string;
     secondary: string;
@@ -64,7 +66,7 @@ export interface CharacterDef {
   rarity: Rarity;
   tagline: string; // one-line personality hook
   bio: string; // short character story
-  favoriteScripture: string; // their anchor verse
+  scripture: string; // their anchor verse
   signaturePower: string; // signature ability name (display)
   voiceLine: string; // spoken/printed catchphrase on select & victory
 }
@@ -173,6 +175,7 @@ export interface SaveData {
   totalXp: number;
   bestScore: number;
   bestDistance: number;
+  ownedCharacters: string[];
   selectedCharacter: string;
   ownedBoards: string[];
   equippedBoard: string;

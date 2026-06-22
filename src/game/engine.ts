@@ -88,6 +88,8 @@ interface AbilityMods {
   revivalPushMult: number;
   jumpMult: number;
   gravityMult: number;
+  royalFavorChance: number;
+  obstacleScoreMult: number;
 }
 
 function abilityMods(character: CharacterDef): AbilityMods {
@@ -97,8 +99,12 @@ function abilityMods(character: CharacterDef): AbilityMods {
     revivalPushMult: character.id === "judah" ? 2 : 1,
     jumpMult: character.id === "kai" ? 1.18 : 1,
     gravityMult: character.id === "kai" ? 0.88 : 1,
+    royalFavorChance: character.id === "esther" ? 0.22 : 0,
+    obstacleScoreMult: character.id === "david" ? 1.5 : 1,
   };
 }
+
+const OBSTACLE_DEFEAT_SCORE = 90;
 
 const OBSTACLE_TABLE: { kind: ObstacleKind; profile: ObstacleProfile }[] = [
   { kind: "fallenCrate", profile: "jump" },
@@ -196,6 +202,7 @@ export class GameEngine {
   private extraDuration: number;
   private scriptureIdx = 0;
   private completedBefore: Set<string>;
+  private royalFavorUsed = false;
 
   constructor(character: CharacterDef, save: SaveData) {
     this.mods = abilityMods(character);
@@ -418,12 +425,14 @@ export class GameEngine {
       if (this.revivalTimer > 0 && ob.z < 8 && ob.lane === this.lane) {
         ob.burned = true;
         this.stats.dodges++;
+        this.awardObstacleDefeat();
         continue;
       }
       // Angel Dash phases straight through danger.
       if (this.invincibleTimer > 0 && ob.z < HIT_Z && ob.lane === this.lane) {
         ob.burned = true;
         this.stats.dodges++;
+        this.awardObstacleDefeat();
         continue;
       }
       if (!ob.passed && ob.z < HIT_Z && ob.z > -0.5) {
@@ -435,6 +444,7 @@ export class GameEngine {
       if (!ob.passed && ob.z <= -0.5) {
         ob.passed = true;
         this.stats.dodges++;
+        this.awardObstacleDefeat();
         // Perfect dodge: cleared an obstacle in your own lane by
         // jumping over or sliding under it at the last moment.
         if (this.alive && Math.abs(this.laneX - ob.lane) < 0.6) {
@@ -494,6 +504,16 @@ export class GameEngine {
   }
 
   private crash() {
+    if (
+      this.mods.royalFavorChance > 0 &&
+      !this.royalFavorUsed &&
+      Math.random() < this.mods.royalFavorChance
+    ) {
+      this.royalFavorUsed = true;
+      this.satan = Math.min(SATAN_SOFT_CAP, this.satan + 0.08);
+      this.events.push({ type: "stumble" });
+      return;
+    }
     // Any hit breaks your streaks.
     this.combo = 0;
     this.dodgeStreak = 0;
@@ -517,6 +537,11 @@ export class GameEngine {
     if (this.combo > 0 && this.combo % 10 === 0) {
       this.events.push({ type: "combo", count: this.combo });
     }
+  }
+
+  private awardObstacleDefeat(multiplier = 1) {
+    this.stats.score +=
+      OBSTACLE_DEFEAT_SCORE * this.mods.obstacleScoreMult * multiplier * this.scoreMult;
   }
 
   private collect(kind: CollectibleKind) {
@@ -597,6 +622,7 @@ export class GameEngine {
           if (!ob.burned && !ob.passed && ob.lane === this.lane && ob.z > 0) {
             ob.burned = true;
             this.stats.dodges++;
+            this.awardObstacleDefeat();
           }
         }
         break;

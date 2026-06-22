@@ -75,7 +75,7 @@ export function StartScreen({
         <div className="text-left">
           <p className="text-sm text-white/60">Running as</p>
           <p className="font-extrabold" style={{ color: ch.colors.secondary }}>
-            {ch.name} · {ch.clothingText}
+            {ch.name} · {ch.title}
           </p>
         </div>
         <div className="ml-4 border-l border-white/20 pl-4 text-left">
