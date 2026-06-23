@@ -1,7 +1,10 @@
 import type { SaveData } from "../types";
 import { defaultOwnedCharacterIds, isCharacterId, STARTER_CHARACTER_ID } from "../data/characters";
+import { getDefaultVenue } from "../data/venues";
 
 const KEY = "christian-surfers-save-v1";
+
+const DEFAULT_VENUE = getDefaultVenue();
 
 export const DEFAULT_SAVE: SaveData = {
   totalCoins: 0,
@@ -12,6 +15,8 @@ export const DEFAULT_SAVE: SaveData = {
   selectedCharacter: STARTER_CHARACTER_ID,
   ownedBoards: ["john316"],
   equippedBoard: "john316",
+  ownedVenues: [DEFAULT_VENUE.id],
+  equippedVenue: DEFAULT_VENUE.id,
   lastDailyClaim: "",
   dailyStreak: 0,
   lifetime: { distance: 0, coins: 0, scrolls: 0, runs: 0, bestCombo: 0, perfectDodges: 0 },
@@ -49,11 +54,30 @@ export function loadSave(): SaveData {
       ...new Set([...defaultOwnedCharacterIds(), ...ownedCharacters, selectedCharacter]),
     ];
 
+    // Venue migration: ensure ownedVenues exists and includes sunrise_boardwalk
+    const defaultVenueId = getDefaultVenue().id;
+    let ownedVenues = Array.isArray(parsed.ownedVenues)
+      ? parsed.ownedVenues.filter((id): id is string => typeof id === "string")
+      : [];
+    
+    // Ensure default venue is always owned
+    if (!ownedVenues.includes(defaultVenueId)) {
+      ownedVenues = [defaultVenueId, ...ownedVenues];
+    }
+
+    // Equipped venue migration: validate and fallback to default
+    let equippedVenue = typeof parsed.equippedVenue === "string" ? parsed.equippedVenue : defaultVenueId;
+    if (!ownedVenues.includes(equippedVenue)) {
+      equippedVenue = defaultVenueId;
+    }
+
     return {
       ...structuredClone(DEFAULT_SAVE),
       ...parsed,
       ownedCharacters: migratedOwnedCharacters,
       selectedCharacter,
+      ownedVenues,
+      equippedVenue,
       settings: { ...DEFAULT_SAVE.settings, ...(parsed.settings ?? {}) },
     };
   } catch {
