@@ -1,0 +1,628 @@
+<!DOCTYPE html>
+<html lang="en">
+<head>
+  <meta charset="utf-8">
+  <title>Christian Surfers - Character Extraction Review</title>
+  <link rel="preconnect" href="https://fonts.googleapis.com">
+  <link rel="preconnect" href="https://fonts.gstatic.com" crossorigin>
+  <link href="https://fonts.googleapis.com/css2?family=Outfit:wght@300;400;600;800&display=swap" rel="stylesheet">
+  <style>
+    :root {
+      --bg-dark: #09090b;
+      --bg-card: rgba(20, 20, 25, 0.7);
+      --border-color: rgba(63, 63, 70, 0.4);
+      --text-main: #f4f4f5;
+      --text-muted: #a1a1aa;
+      --accent-green: #10b981;
+      --accent-green-bg: rgba(16, 185, 129, 0.15);
+      --accent-purple: #8b5cf6;
+      --glow-color: rgba(139, 92, 246, 0.15);
+    }
+
+    * {
+      box-sizing: border-box;
+      margin: 0;
+      padding: 0;
+    }
+
+    body {
+      font-family: 'Outfit', sans-serif;
+      background-color: var(--bg-dark);
+      color: var(--text-main);
+      padding: 40px 20px;
+      min-height: 100vh;
+      background-image: 
+        radial-gradient(at 0% 0%, rgba(30, 20, 50, 0.3) 0px, transparent 50%),
+        radial-gradient(at 100% 100%, rgba(10, 30, 40, 0.3) 0px, transparent 50%);
+    }
+
+    header {
+      max-width: 1400px;
+      margin: 0 auto 40px auto;
+      text-align: center;
+      padding-bottom: 20px;
+      border-bottom: 1px solid var(--border-color);
+    }
+
+    h1 {
+      font-size: 2.8rem;
+      font-weight: 800;
+      letter-spacing: -0.05em;
+      margin-bottom: 10px;
+      background: linear-gradient(135deg, #fff 30%, #a1a1aa 100%);
+      -webkit-background-clip: text;
+      -webkit-text-fill-color: transparent;
+    }
+
+    .subtitle {
+      font-size: 1.1rem;
+      color: var(--text-muted);
+      font-weight: 300;
+    }
+
+    .grid-container {
+      max-width: 1400px;
+      margin: 0 auto;
+      display: grid;
+      grid-template-columns: repeat(auto-fill, minmax(420px, 1fr));
+      gap: 30px;
+    }
+
+    .card {
+      background: var(--bg-card);
+      border: 1px solid var(--border-color);
+      border-radius: 16px;
+      padding: 24px;
+      backdrop-filter: blur(12px);
+      -webkit-backdrop-filter: blur(12px);
+      box-shadow: 0 4px 30px rgba(0, 0, 0, 0.5);
+      transition: all 0.3s cubic-bezier(0.4, 0, 0.2, 1);
+      position: relative;
+      overflow: hidden;
+    }
+
+    .card:hover {
+      transform: translateY(-4px);
+      border-color: rgba(139, 92, 246, 0.4);
+      box-shadow: 0 10px 30px var(--glow-color);
+    }
+
+    .card::before {
+      content: '';
+      position: absolute;
+      top: 0;
+      left: 0;
+      width: 100%;
+      height: 100%;
+      background: linear-gradient(225deg, transparent 95%, var(--accent-purple) 100%);
+      pointer-events: none;
+      opacity: 0.5;
+    }
+
+    .card-header {
+      display: flex;
+      justify-content: space-between;
+      align-items: center;
+      margin-bottom: 20px;
+      padding-bottom: 10px;
+      border-bottom: 1px solid rgba(255, 255, 255, 0.05);
+    }
+
+    .character-name {
+      font-size: 1.6rem;
+      font-weight: 600;
+      color: #ffffff;
+      letter-spacing: -0.02em;
+    }
+
+    .badge-status {
+      padding: 6px 14px;
+      border-radius: 9999px;
+      font-size: 0.8rem;
+      font-weight: 600;
+      text-transform: uppercase;
+      letter-spacing: 0.05em;
+      background-color: var(--accent-green-bg);
+      color: var(--accent-green);
+      border: 1px solid rgba(16, 185, 129, 0.3);
+      box-shadow: 0 0 12px rgba(16, 185, 129, 0.1);
+    }
+
+    .comparison-views {
+      display: grid;
+      grid-template-columns: 1fr 1fr;
+      gap: 16px;
+      margin-bottom: 20px;
+    }
+
+    .view-box {
+      text-align: center;
+    }
+
+    .view-title {
+      font-size: 0.75rem;
+      color: var(--text-muted);
+      text-transform: uppercase;
+      letter-spacing: 0.05em;
+      margin-bottom: 8px;
+      font-weight: 600;
+    }
+
+    .image-wrapper {
+      background: #18181b;
+      border: 1px solid rgba(255, 255, 255, 0.03);
+      border-radius: 12px;
+      height: 280px;
+      display: flex;
+      align-items: center;
+      justify-content: center;
+      overflow: hidden;
+      position: relative;
+    }
+
+    .transparent-pattern {
+      background-color: #121214;
+      background-image: 
+        linear-gradient(45deg, #18181b 25%, transparent 25%), 
+        linear-gradient(-45deg, #18181b 25%, transparent 25%), 
+        linear-gradient(45deg, transparent 75%, #18181b 75%), 
+        linear-gradient(-45deg, transparent 75%, #18181b 75%);
+      background-size: 16px 16px;
+      background-position: 0 0, 0 8px, 8px -8px, -8px 0px;
+    }
+
+    .image-wrapper img {
+      max-width: 90%;
+      max-height: 90%;
+      object-fit: contain;
+      transition: transform 0.5s ease;
+    }
+
+    .image-wrapper:hover img {
+      transform: scale(1.05);
+    }
+
+    .metadata-panel {
+      background: rgba(255, 255, 255, 0.02);
+      border: 1px solid rgba(255, 255, 255, 0.04);
+      border-radius: 10px;
+      padding: 12px 16px;
+      font-size: 0.85rem;
+    }
+
+    .metadata-row {
+      display: flex;
+      justify-content: space-between;
+      padding: 6px 0;
+      border-bottom: 1px solid rgba(255, 255, 255, 0.03);
+    }
+
+    .metadata-row:last-child {
+      border-bottom: none;
+    }
+
+    .metadata-label {
+      color: var(--text-muted);
+    }
+
+    .metadata-value {
+      color: #ffffff;
+      font-weight: 600;
+    }
+
+    .notes-box {
+      margin-top: 10px;
+      font-size: 0.8rem;
+      color: #c8c8cf;
+      line-height: 1.4;
+      border-top: 1px solid rgba(255, 255, 255, 0.03);
+      padding-top: 8px;
+    }
+
+    .notes-box strong {
+      color: var(--accent-purple);
+    }
+
+    @media (max-width: 768px) {
+      .grid-container {
+        grid-template-columns: 1fr;
+      }
+    }
+  </style>
+</head>
+<body>
+  <header>
+    <h1>Character Sprite Review Panel</h1>
+    <div class="subtitle">christian-surfers-game character extraction preview gallery (11 characters total)</div>
+  </header>
+
+  <main class="grid-container">
+
+    <!-- Card for David -->
+    <div class="card" id="card-david">
+      <div class="card-header">
+        <h2 class="character-name">David</h2>
+        <span class="badge-status">PASS</span>
+      </div>
+      <div class="comparison-views">
+        <div class="view-box">
+          <div class="view-title">Original Sheet</div>
+          <div class="image-wrapper">
+            <img src="orig_david.png" alt="David original sheet" id="img-orig-david">
+          </div>
+        </div>
+        <div class="view-box">
+          <div class="view-title">Extracted Sprite</div>
+          <div class="image-wrapper transparent-pattern">
+            <img src="preview_largest_David.png" alt="David extracted sprite" id="img-sprite-david">
+          </div>
+        </div>
+      </div>
+      <div class="metadata-panel">
+        <div class="metadata-row">
+          <span class="metadata-label">Confidence Score</span>
+          <span class="metadata-value" style="color: #10b981;">98%</span>
+        </div>
+        <div class="metadata-row">
+          <span class="metadata-label">Status Summary</span>
+          <span class="metadata-value">PASS</span>
+        </div>
+        <div class="notes-box">
+          <strong>Details:</strong> Isolated cleanly.
+        </div>
+      </div>
+    </div>
+
+    <!-- Card for Esther -->
+    <div class="card" id="card-esther">
+      <div class="card-header">
+        <h2 class="character-name">Esther</h2>
+        <span class="badge-status">PASS</span>
+      </div>
+      <div class="comparison-views">
+        <div class="view-box">
+          <div class="view-title">Original Sheet</div>
+          <div class="image-wrapper">
+            <img src="orig_esther.png" alt="Esther original sheet" id="img-orig-esther">
+          </div>
+        </div>
+        <div class="view-box">
+          <div class="view-title">Extracted Sprite</div>
+          <div class="image-wrapper transparent-pattern">
+            <img src="preview_largest_Esther.png" alt="Esther extracted sprite" id="img-sprite-esther">
+          </div>
+        </div>
+      </div>
+      <div class="metadata-panel">
+        <div class="metadata-row">
+          <span class="metadata-label">Confidence Score</span>
+          <span class="metadata-value" style="color: #10b981;">95%</span>
+        </div>
+        <div class="metadata-row">
+          <span class="metadata-label">Status Summary</span>
+          <span class="metadata-value">PASS</span>
+        </div>
+        <div class="notes-box">
+          <strong>Details:</strong> Refined crop box. Tightened right boundary to remove side thumbnails.
+        </div>
+      </div>
+    </div>
+
+    <!-- Card for Grace -->
+    <div class="card" id="card-grace">
+      <div class="card-header">
+        <h2 class="character-name">Grace</h2>
+        <span class="badge-status">PASS</span>
+      </div>
+      <div class="comparison-views">
+        <div class="view-box">
+          <div class="view-title">Original Sheet</div>
+          <div class="image-wrapper">
+            <img src="orig_grace.png" alt="Grace original sheet" id="img-orig-grace">
+          </div>
+        </div>
+        <div class="view-box">
+          <div class="view-title">Extracted Sprite</div>
+          <div class="image-wrapper transparent-pattern">
+            <img src="preview_largest_Grace.png" alt="Grace extracted sprite" id="img-sprite-grace">
+          </div>
+        </div>
+      </div>
+      <div class="metadata-panel">
+        <div class="metadata-row">
+          <span class="metadata-label">Confidence Score</span>
+          <span class="metadata-value" style="color: #10b981;">98%</span>
+        </div>
+        <div class="metadata-row">
+          <span class="metadata-label">Status Summary</span>
+          <span class="metadata-value">PASS</span>
+        </div>
+        <div class="notes-box">
+          <strong>Details:</strong> Isolated cleanly.
+        </div>
+      </div>
+    </div>
+
+    <!-- Card for Judah -->
+    <div class="card" id="card-judah">
+      <div class="card-header">
+        <h2 class="character-name">Judah</h2>
+        <span class="badge-status">PASS</span>
+      </div>
+      <div class="comparison-views">
+        <div class="view-box">
+          <div class="view-title">Original Sheet</div>
+          <div class="image-wrapper">
+            <img src="orig_judah.png" alt="Judah original sheet" id="img-orig-judah">
+          </div>
+        </div>
+        <div class="view-box">
+          <div class="view-title">Extracted Sprite</div>
+          <div class="image-wrapper transparent-pattern">
+            <img src="preview_largest_Judah.png" alt="Judah extracted sprite" id="img-sprite-judah">
+          </div>
+        </div>
+      </div>
+      <div class="metadata-panel">
+        <div class="metadata-row">
+          <span class="metadata-label">Confidence Score</span>
+          <span class="metadata-value" style="color: #10b981;">98%</span>
+        </div>
+        <div class="metadata-row">
+          <span class="metadata-label">Status Summary</span>
+          <span class="metadata-value">PASS</span>
+        </div>
+        <div class="notes-box">
+          <strong>Details:</strong> Isolated cleanly.
+        </div>
+      </div>
+    </div>
+
+    <!-- Card for Kai -->
+    <div class="card" id="card-kai">
+      <div class="card-header">
+        <h2 class="character-name">Kai</h2>
+        <span class="badge-status">PASS</span>
+      </div>
+      <div class="comparison-views">
+        <div class="view-box">
+          <div class="view-title">Original Sheet</div>
+          <div class="image-wrapper">
+            <img src="orig_kai.png" alt="Kai original sheet" id="img-orig-kai">
+          </div>
+        </div>
+        <div class="view-box">
+          <div class="view-title">Extracted Sprite</div>
+          <div class="image-wrapper transparent-pattern">
+            <img src="preview_largest_Kai.png" alt="Kai extracted sprite" id="img-sprite-kai">
+          </div>
+        </div>
+      </div>
+      <div class="metadata-panel">
+        <div class="metadata-row">
+          <span class="metadata-label">Confidence Score</span>
+          <span class="metadata-value" style="color: #10b981;">95%</span>
+        </div>
+        <div class="metadata-row">
+          <span class="metadata-label">Status Summary</span>
+          <span class="metadata-value">PASS</span>
+        </div>
+        <div class="notes-box">
+          <strong>Details:</strong> Refined crop box. Tightened bottom boundary to remove stats panel remnants.
+        </div>
+      </div>
+    </div>
+
+    <!-- Card for Malachi -->
+    <div class="card" id="card-malachi">
+      <div class="card-header">
+        <h2 class="character-name">Malachi</h2>
+        <span class="badge-status">PASS</span>
+      </div>
+      <div class="comparison-views">
+        <div class="view-box">
+          <div class="view-title">Original Sheet</div>
+          <div class="image-wrapper">
+            <img src="orig_malachi.png" alt="Malachi original sheet" id="img-orig-malachi">
+          </div>
+        </div>
+        <div class="view-box">
+          <div class="view-title">Extracted Sprite</div>
+          <div class="image-wrapper transparent-pattern">
+            <img src="preview_largest_Malachi.png" alt="Malachi extracted sprite" id="img-sprite-malachi">
+          </div>
+        </div>
+      </div>
+      <div class="metadata-panel">
+        <div class="metadata-row">
+          <span class="metadata-label">Confidence Score</span>
+          <span class="metadata-value" style="color: #10b981;">98%</span>
+        </div>
+        <div class="metadata-row">
+          <span class="metadata-label">Status Summary</span>
+          <span class="metadata-value">PASS</span>
+        </div>
+        <div class="notes-box">
+          <strong>Details:</strong> Isolated cleanly.
+        </div>
+      </div>
+    </div>
+
+    <!-- Card for Mercy -->
+    <div class="card" id="card-mercy">
+      <div class="card-header">
+        <h2 class="character-name">Mercy</h2>
+        <span class="badge-status">PASS</span>
+      </div>
+      <div class="comparison-views">
+        <div class="view-box">
+          <div class="view-title">Original Sheet</div>
+          <div class="image-wrapper">
+            <img src="orig_mercy.png" alt="Mercy original sheet" id="img-orig-mercy">
+          </div>
+        </div>
+        <div class="view-box">
+          <div class="view-title">Extracted Sprite</div>
+          <div class="image-wrapper transparent-pattern">
+            <img src="preview_largest_Mercy.png" alt="Mercy extracted sprite" id="img-sprite-mercy">
+          </div>
+        </div>
+      </div>
+      <div class="metadata-panel">
+        <div class="metadata-row">
+          <span class="metadata-label">Confidence Score</span>
+          <span class="metadata-value" style="color: #10b981;">98%</span>
+        </div>
+        <div class="metadata-row">
+          <span class="metadata-label">Status Summary</span>
+          <span class="metadata-value">PASS</span>
+        </div>
+        <div class="notes-box">
+          <strong>Details:</strong> Isolated cleanly.
+        </div>
+      </div>
+    </div>
+
+    <!-- Card for Samuel -->
+    <div class="card" id="card-samuel">
+      <div class="card-header">
+        <h2 class="character-name">Samuel</h2>
+        <span class="badge-status">PASS</span>
+      </div>
+      <div class="comparison-views">
+        <div class="view-box">
+          <div class="view-title">Original Sheet</div>
+          <div class="image-wrapper">
+            <img src="orig_samuel.png" alt="Samuel original sheet" id="img-orig-samuel">
+          </div>
+        </div>
+        <div class="view-box">
+          <div class="view-title">Extracted Sprite</div>
+          <div class="image-wrapper transparent-pattern">
+            <img src="preview_largest_Samuel.png" alt="Samuel extracted sprite" id="img-sprite-samuel">
+          </div>
+        </div>
+      </div>
+      <div class="metadata-panel">
+        <div class="metadata-row">
+          <span class="metadata-label">Confidence Score</span>
+          <span class="metadata-value" style="color: #10b981;">98%</span>
+        </div>
+        <div class="metadata-row">
+          <span class="metadata-label">Status Summary</span>
+          <span class="metadata-value">PASS</span>
+        </div>
+        <div class="notes-box">
+          <strong>Details:</strong> Isolated cleanly.
+        </div>
+      </div>
+    </div>
+
+    <!-- Card for Selah -->
+    <div class="card" id="card-selah">
+      <div class="card-header">
+        <h2 class="character-name">Selah</h2>
+        <span class="badge-status">PASS</span>
+      </div>
+      <div class="comparison-views">
+        <div class="view-box">
+          <div class="view-title">Original Sheet</div>
+          <div class="image-wrapper">
+            <img src="orig_selah.png" alt="Selah original sheet" id="img-orig-selah">
+          </div>
+        </div>
+        <div class="view-box">
+          <div class="view-title">Extracted Sprite</div>
+          <div class="image-wrapper transparent-pattern">
+            <img src="preview_largest_Selah.png" alt="Selah extracted sprite" id="img-sprite-selah">
+          </div>
+        </div>
+      </div>
+      <div class="metadata-panel">
+        <div class="metadata-row">
+          <span class="metadata-label">Confidence Score</span>
+          <span class="metadata-value" style="color: #10b981;">98%</span>
+        </div>
+        <div class="metadata-row">
+          <span class="metadata-label">Status Summary</span>
+          <span class="metadata-value">PASS</span>
+        </div>
+        <div class="notes-box">
+          <strong>Details:</strong> Isolated cleanly.
+        </div>
+      </div>
+    </div>
+
+    <!-- Card for The Accuser -->
+    <div class="card" id="card-the_accuser">
+      <div class="card-header">
+        <h2 class="character-name">The Accuser</h2>
+        <span class="badge-status">PASS</span>
+      </div>
+      <div class="comparison-views">
+        <div class="view-box">
+          <div class="view-title">Original Sheet</div>
+          <div class="image-wrapper">
+            <img src="orig_the_accuser_aka_satan.png" alt="The Accuser original sheet" id="img-orig-the_accuser">
+          </div>
+        </div>
+        <div class="view-box">
+          <div class="view-title">Extracted Sprite</div>
+          <div class="image-wrapper transparent-pattern">
+            <img src="preview_largest_The Accuser Aka Satan.png" alt="The Accuser extracted sprite" id="img-sprite-the_accuser">
+          </div>
+        </div>
+      </div>
+      <div class="metadata-panel">
+        <div class="metadata-row">
+          <span class="metadata-label">Confidence Score</span>
+          <span class="metadata-value" style="color: #10b981;">98%</span>
+        </div>
+        <div class="metadata-row">
+          <span class="metadata-label">Status Summary</span>
+          <span class="metadata-value">PASS</span>
+        </div>
+        <div class="notes-box">
+          <strong>Details:</strong> Isolated cleanly.
+        </div>
+      </div>
+    </div>
+
+    <!-- Card for Zion -->
+    <div class="card" id="card-zion">
+      <div class="card-header">
+        <h2 class="character-name">Zion</h2>
+        <span class="badge-status">PASS</span>
+      </div>
+      <div class="comparison-views">
+        <div class="view-box">
+          <div class="view-title">Original Sheet</div>
+          <div class="image-wrapper">
+            <img src="orig_zion.png" alt="Zion original sheet" id="img-orig-zion">
+          </div>
+        </div>
+        <div class="view-box">
+          <div class="view-title">Extracted Sprite</div>
+          <div class="image-wrapper transparent-pattern">
+            <img src="preview_largest_Zion.png" alt="Zion extracted sprite" id="img-sprite-zion">
+          </div>
+        </div>
+      </div>
+      <div class="metadata-panel">
+        <div class="metadata-row">
+          <span class="metadata-label">Confidence Score</span>
+          <span class="metadata-value" style="color: #10b981;">98%</span>
+        </div>
+        <div class="metadata-row">
+          <span class="metadata-label">Status Summary</span>
+          <span class="metadata-value">PASS</span>
+        </div>
+        <div class="notes-box">
+          <strong>Details:</strong> Isolated cleanly.
+        </div>
+      </div>
+    </div>
+
+  </main>
+</body>
+</html>

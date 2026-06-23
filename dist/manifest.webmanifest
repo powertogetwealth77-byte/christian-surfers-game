@@ -1,0 +1,32 @@
+{
+  "name": "Christian Surfers — Run in the Light",
+  "short_name": "Christian Surfers",
+  "description": "A faith-based endless runner. Outrun the Accuser on the Kingdom Boardwalk.",
+  "start_url": ".",
+  "scope": ".",
+  "display": "standalone",
+  "orientation": "portrait",
+  "theme_color": "#0a1024",
+  "background_color": "#0a1024",
+  "categories": ["games"],
+  "icons": [
+    {
+      "src": "icons/icon-192.png",
+      "sizes": "192x192",
+      "type": "image/png",
+      "purpose": "any"
+    },
+    {
+      "src": "icons/icon-512.png",
+      "sizes": "512x512",
+      "type": "image/png",
+      "purpose": "any"
+    },
+    {
+      "src": "icons/icon-512.png",
+      "sizes": "512x512",
+      "type": "image/png",
+      "purpose": "maskable"
+    }
+  ]
+}

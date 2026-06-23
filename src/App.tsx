@@ -16,6 +16,7 @@ import { GameScreen } from "./screens/GameScreen";
 import { GameOverScreen } from "./screens/GameOverScreen";
 import { RewardsScreen } from "./screens/RewardsScreen";
 import { InstallScreen } from "./screens/InstallScreen";
+import VenueStoreScreen from "./screens/VenueStoreScreen";
 import { RotateOverlay } from "./components/RotateOverlay";
 
 export default function App() {
@@ -142,6 +143,31 @@ export default function App() {
                 }))
               }
               onEquip={(id) => updateSave({ equippedBoard: id })}
+              onBack={() => setScreen("start")}
+            />
+          )}
+          {screen === "venues" && (
+            <VenueStoreScreen
+              save={save}
+              onBuyVenue={(id, cost) => {
+                let purchased = false;
+                setSave((s) => {
+                  if (s.ownedVenues.includes(id) || s.totalCoins < cost) return s;
+                  purchased = true;
+                  return {
+                    ...s,
+                    totalCoins: s.totalCoins - cost,
+                    ownedVenues: [...new Set([...s.ownedVenues, id])],
+                    equippedVenue: id,
+                  };
+                });
+                return purchased;
+              }}
+              onEquipVenue={(id) => {
+                if (save.ownedVenues.includes(id)) {
+                  updateSave({ equippedVenue: id });
+                }
+              }}
               onBack={() => setScreen("start")}
             />
           )}

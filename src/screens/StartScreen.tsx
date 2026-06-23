@@ -107,6 +107,9 @@ export function StartScreen({
           <Button variant="secondary" onClick={() => go("boards")}>
             🛹 Boards
           </Button>
+          <Button variant="secondary" onClick={() => go("venues")}>
+            🌍 Worlds
+          </Button>
           <Button variant="secondary" onClick={() => go("collection")}>
             📚 Collection
           </Button>
