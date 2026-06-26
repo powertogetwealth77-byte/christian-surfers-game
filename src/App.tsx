@@ -8,6 +8,7 @@ import { LoadingScreen } from "./screens/LoadingScreen";
 import { StartScreen } from "./screens/StartScreen";
 import { CharacterSelectScreen } from "./screens/CharacterSelectScreen";
 import { BoardStoreScreen } from "./screens/BoardStoreScreen";
+import { VenuesScreen } from "./screens/VenuesScreen";
 import { CollectionScreen } from "./screens/CollectionScreen";
 import { MissionsScreen } from "./screens/MissionsScreen";
 import { UpgradesScreen } from "./screens/UpgradesScreen";
@@ -144,6 +145,9 @@ export default function App() {
               onEquip={(id) => updateSave({ equippedBoard: id })}
               onBack={() => setScreen("start")}
             />
+          )}
+          {screen === "venues" && (
+            <VenuesScreen onBack={() => setScreen("start")} onPlay={() => setScreen("game")} />
           )}
           {screen === "collection" && (
             <CollectionScreen
