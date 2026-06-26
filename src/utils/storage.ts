@@ -1,5 +1,6 @@
 import type { SaveData } from "../types";
 import { defaultOwnedCharacterIds, isCharacterId, STARTER_CHARACTER_ID } from "../data/characters";
+import { DEFAULT_VENUE_ID, isVenueId } from "../data/kingdomScenes";
 
 const KEY = "christian-surfers-save-v1";
 
@@ -12,6 +13,8 @@ export const DEFAULT_SAVE: SaveData = {
   selectedCharacter: STARTER_CHARACTER_ID,
   ownedBoards: ["john316"],
   equippedBoard: "john316",
+  ownedVenues: [DEFAULT_VENUE_ID],
+  selectedVenue: DEFAULT_VENUE_ID,
   lastDailyClaim: "",
   dailyStreak: 0,
   lifetime: { distance: 0, coins: 0, scrolls: 0, runs: 0, bestCombo: 0, perfectDodges: 0 },
@@ -49,11 +52,19 @@ export function loadSave(): SaveData {
       ...new Set([...defaultOwnedCharacterIds(), ...ownedCharacters, selectedCharacter]),
     ];
 
+    const selectedVenue = isVenueId(parsed.selectedVenue) ? parsed.selectedVenue : DEFAULT_VENUE_ID;
+    const ownedVenues = Array.isArray(parsed.ownedVenues)
+      ? parsed.ownedVenues.filter(isVenueId)
+      : [];
+    const migratedOwnedVenues = [...new Set([DEFAULT_VENUE_ID, ...ownedVenues, selectedVenue])];
+
     return {
       ...structuredClone(DEFAULT_SAVE),
       ...parsed,
       ownedCharacters: migratedOwnedCharacters,
       selectedCharacter,
+      ownedVenues: migratedOwnedVenues,
+      selectedVenue,
       settings: { ...DEFAULT_SAVE.settings, ...(parsed.settings ?? {}) },
     };
   } catch {

@@ -1,4 +1,5 @@
 import type { BoardDef, CharacterDef } from "../types";
+import type { KingdomScene } from "../data/kingdomScenes";
 import type { Collectible, GameEngine, Obstacle, PowerUpPickup } from "./engine";
 import { MAX_SPEED, SPAWN_Z } from "./constants";
 
@@ -42,12 +43,32 @@ export class Renderer {
   private camX = 0; // live camera offset
   private camY = 0;
   private board: BoardDef | null = null; // equipped scripture board
+  private venue: KingdomScene | null = null; // selected playable venue
+  private venueImage: HTMLImageElement | null = null;
+  private venueImageSrc = "";
   private punchT = 0; // transient camera zoom punch 0..1
   shake = 0;
 
   /** Set the equipped board so its colors, scripture and trail show in play. */
   setBoard(board: BoardDef) {
     this.board = board;
+  }
+
+  /** Set the selected venue so menus and gameplay use the same world identity. */
+  setVenue(venue: KingdomScene) {
+    this.venue = venue;
+    if (this.venueImageSrc === venue.image) return;
+
+    this.venueImageSrc = venue.image;
+    this.venueImage = null;
+    const image = new Image();
+    image.onload = () => {
+      if (this.venueImageSrc === venue.image) this.venueImage = image;
+    };
+    image.onerror = () => {
+      if (this.venueImageSrc === venue.image) this.venueImage = null;
+    };
+    image.src = venue.image;
   }
 
   addShake(amount: number) {
@@ -210,6 +231,7 @@ export class Renderer {
 
     this.drawSky(ctx, W, H, time, engine.satan);
     this.drawSea(ctx, W, H, time, engine.stats.distance);
+    this.drawVenueBackdrop(ctx, W, H);
     this.drawBoats(ctx, W, H, time);
     this.drawSkyline(ctx, W, H, time);
     this.drawFlock(ctx, W, H, time);
@@ -254,17 +276,55 @@ export class Renderer {
 
   // ---- Environment -------------------------------------------------------
 
+  private drawVenueBackdrop(ctx: CanvasRenderingContext2D, W: number, H: number) {
+    const image = this.venueImage;
+    const venue = this.venue;
+    if (!venue) return;
+
+    ctx.save();
+    if (image && image.complete && image.naturalWidth > 0) {
+      const scale = Math.max(W / image.naturalWidth, H / image.naturalHeight);
+      const dw = image.naturalWidth * scale;
+      const dh = image.naturalHeight * scale;
+      const dx = (W - dw) / 2;
+      const dy = (H - dh) / 2;
+      ctx.globalAlpha = 0.42;
+      ctx.drawImage(image, dx, dy, dw, dh);
+      ctx.globalAlpha = 1;
+      const fade = ctx.createLinearGradient(0, 0, 0, H);
+      fade.addColorStop(0, "rgba(4,8,22,0.10)");
+      fade.addColorStop(0.48, "rgba(4,8,22,0.20)");
+      fade.addColorStop(0.72, "rgba(4,8,22,0.50)");
+      fade.addColorStop(1, "rgba(4,8,22,0.82)");
+      ctx.fillStyle = fade;
+      ctx.fillRect(-40, -40, W + 80, H + 80);
+    }
+
+    const tint = ctx.createLinearGradient(0, 0, 0, H);
+    tint.addColorStop(0, `${venue.colors.skyTop}55`);
+    tint.addColorStop(0.42, `${venue.colors.glow}24`);
+    tint.addColorStop(1, `${venue.colors.seaDeep}66`);
+    ctx.globalCompositeOperation = "source-over";
+    ctx.fillStyle = tint;
+    ctx.fillRect(-40, -40, W + 80, H + 80);
+    ctx.restore();
+  }
+
   private drawSky(ctx: CanvasRenderingContext2D, W: number, H: number, time: number, satanProx: number) {
     const horizon = H * 0.36;
     // Sky shifts from dawn-gold to blood-red as Satan closes in
     const danger = Math.max(0, satanProx - 0.5) * 2; // 0..1
-    const top = danger > 0 ? `rgb(${Math.round(30 + danger * 80)},${Math.round(42 - danger * 20)},${Math.round(120 - danger * 60)})` : "#1e2a78";
-    const mid = danger > 0 ? `rgb(${Math.round(122 + danger * 80)},${Math.round(79 - danger * 40)},${Math.round(176 - danger * 80)})` : "#7a4fb0";
+    const venueColors = this.venue?.colors;
+    const topBase = venueColors?.skyTop ?? "#1e2a78";
+    const midBase = venueColors?.skyMid ?? "#7a4fb0";
+    const glowBase = venueColors?.glow ?? "#ffd166";
+    const top = danger > 0 ? `rgb(${Math.round(30 + danger * 80)},${Math.round(42 - danger * 20)},${Math.round(120 - danger * 60)})` : topBase;
+    const mid = danger > 0 ? `rgb(${Math.round(122 + danger * 80)},${Math.round(79 - danger * 40)},${Math.round(176 - danger * 80)})` : midBase;
     const sky = ctx.createLinearGradient(0, 0, 0, horizon * 1.3);
     sky.addColorStop(0, top);
     sky.addColorStop(0.45, mid);
     sky.addColorStop(0.78, "#f08a4b");
-    sky.addColorStop(1, "#ffd166");
+    sky.addColorStop(1, glowBase);
     ctx.fillStyle = sky;
     // Overdraw above the top edge so a living camera never reveals a gap.
     ctx.fillRect(-40, -40, W + 80, horizon * 1.35 + 40);
@@ -343,10 +403,11 @@ export class Renderer {
     dist: number,
   ) {
     const horizon = H * 0.36;
+    const venueColors = this.venue?.colors;
     const sea = ctx.createLinearGradient(0, horizon, 0, H);
-    sea.addColorStop(0, "#f2a65a");
-    sea.addColorStop(0.18, "#1f7ba6");
-    sea.addColorStop(1, "#0c3a5e");
+    sea.addColorStop(0, venueColors?.glow ?? "#f2a65a");
+    sea.addColorStop(0.18, venueColors?.seaTop ?? "#1f7ba6");
+    sea.addColorStop(1, venueColors?.seaDeep ?? "#0c3a5e");
     ctx.fillStyle = sea;
     ctx.fillRect(-40, horizon, W + 80, H - horizon + 40);
 

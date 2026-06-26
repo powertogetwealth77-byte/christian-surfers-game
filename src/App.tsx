@@ -147,7 +147,26 @@ export default function App() {
             />
           )}
           {screen === "venues" && (
-            <VenuesScreen onBack={() => setScreen("start")} onPlay={() => setScreen("game")} />
+            <VenuesScreen
+              save={save}
+              onBack={() => setScreen("start")}
+              onPlay={() => setScreen("game")}
+              onEquip={(id) => updateSave({ selectedVenue: id })}
+              onPurchase={(id, cost) => {
+                let purchased = false;
+                setSave((s) => {
+                  if (s.ownedVenues.includes(id) || s.totalCoins < cost) return s;
+                  purchased = true;
+                  return {
+                    ...s,
+                    totalCoins: Math.max(0, s.totalCoins - cost),
+                    ownedVenues: [...new Set([...s.ownedVenues, id])],
+                    selectedVenue: id,
+                  };
+                });
+                return purchased;
+              }}
+            />
           )}
           {screen === "collection" && (
             <CollectionScreen

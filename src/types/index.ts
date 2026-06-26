@@ -180,6 +180,8 @@ export interface SaveData {
   selectedCharacter: string;
   ownedBoards: string[];
   equippedBoard: string;
+  ownedVenues: string[];
+  selectedVenue: string;
   lastDailyClaim: string; // YYYY-MM-DD of the last claimed Daily Blessing
   dailyStreak: number; // consecutive days claimed
   lifetime: LifetimeStats;

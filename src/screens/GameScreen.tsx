@@ -5,6 +5,7 @@ import { GameEngine } from "../game/engine";
 import { Renderer } from "../game/render";
 import { getCharacter } from "../data/characters";
 import { getBoard } from "../data/boards";
+import { getVenue } from "../data/kingdomScenes";
 import { missionProgress } from "../data/missions";
 import { POWER_UPS } from "../data/powerups";
 import { sound } from "../audio/SoundEngine";
@@ -105,6 +106,7 @@ export function GameScreen({
     pausedRef.current = false;
     const renderer = rendererRef.current;
     renderer.setBoard(getBoard(save.equippedBoard));
+    renderer.setVenue(getVenue(save.selectedVenue));
 
     sound.unlock();
     sound.play("startRun");
