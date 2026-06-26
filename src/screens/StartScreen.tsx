@@ -3,6 +3,7 @@ import type { SaveData, Screen } from "../types";
 import { Button } from "../components/Button";
 import { DailyBlessing } from "../components/DailyBlessing";
 import { getCharacter } from "../data/characters";
+import { KINGDOM_SCENES } from "../data/kingdomScenes";
 import { todayKey, yesterdayKey } from "../utils/storage";
 
 export function StartScreen({
@@ -17,9 +18,30 @@ export function StartScreen({
   const ch = getCharacter(save.selectedCharacter);
   const dailyEligible = save.lastDailyClaim !== todayKey();
   const nextStreak = save.lastDailyClaim === yesterdayKey() ? save.dailyStreak + 1 : 1;
+  const sceneCycleDuration = KINGDOM_SCENES.length * 5;
 
   return (
-    <div className="relative flex h-full flex-col items-center justify-between overflow-hidden bg-gradient-to-b from-[#1e2a78] via-[#7a4fb0] to-[#f08a4b] px-6 py-10 safe-top safe-bottom">
+    <div className="relative flex h-full flex-col items-center justify-between overflow-hidden bg-night px-6 py-10 safe-top safe-bottom">
+      <div className="pointer-events-none absolute inset-0">
+        {KINGDOM_SCENES.map((scene, index) => (
+          <motion.div
+            key={scene.id}
+            className="absolute inset-0 bg-cover bg-center"
+            style={{ backgroundImage: `url(${scene.image})` }}
+            initial={{ opacity: index === 0 ? 1 : 0, scale: 1.06 }}
+            animate={{ opacity: [0, 1, 1, 0], scale: [1.08, 1.03, 1.01, 1] }}
+            transition={{
+              delay: index * 5,
+              duration: 5,
+              repeat: Infinity,
+              repeatDelay: sceneCycleDuration - 5,
+              ease: "easeInOut",
+            }}
+          />
+        ))}
+        <div className="absolute inset-0 bg-gradient-to-b from-[#04112f]/35 via-[#08101d]/42 to-[#050816]/86" />
+        <div className="absolute inset-0 bg-[radial-gradient(circle_at_50%_15%,rgba(255,231,145,0.45),transparent_28%),radial-gradient(circle_at_50%_80%,rgba(14,165,233,0.25),transparent_35%)]" />
+      </div>
       {dailyEligible && (
         <DailyBlessing
           streak={nextStreak}
