@@ -123,6 +123,9 @@ export function StartScreen({
           </Button>
         </motion.div>
         <div className="grid grid-cols-2 gap-3">
+          <Button variant="secondary" onClick={() => go("venues")}>
+            🏝 Venues
+          </Button>
           <Button variant="secondary" onClick={() => go("characters")}>
             🏃 Characters
           </Button>
@@ -138,10 +141,10 @@ export function StartScreen({
           <Button variant="secondary" onClick={() => go("upgrades")}>
             ⬆ Upgrades
           </Button>
-          <Button variant="secondary" onClick={() => go("settings")}>
-            ⚙ Settings
-          </Button>
         </div>
+        <Button variant="secondary" onClick={() => go("settings")}>
+          ⚙ Settings
+        </Button>
         <p className="mt-1 text-center text-sm text-white/70">
           💰 {save.totalCoins.toLocaleString()} Light Coins · ✨{" "}
           {save.totalXp.toLocaleString()} XP

@@ -3,6 +3,7 @@ export type Screen =
   | "start"
   | "characters"
   | "boards"
+  | "venues"
   | "collection"
   | "missions"
   | "upgrades"
