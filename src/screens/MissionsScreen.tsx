@@ -34,7 +34,7 @@ export function MissionsScreen({
       </div>
 
       {/* Overall progress bar */}
-      <div className="mb-4 overflow-hidden rounded-full bg-white/10 h-2">
+      <div className="mb-4 h-2 overflow-hidden rounded-full bg-black/30">
         <motion.div
           className="h-full rounded-full bg-gradient-to-r from-gold-400 to-emerald-400"
           initial={{ width: 0 }}
@@ -53,10 +53,10 @@ export function MissionsScreen({
               initial={{ x: -24, opacity: 0 }}
               animate={{ x: 0, opacity: 1 }}
               transition={{ delay: i * 0.06 }}
-              className={`rounded-2xl border p-4 ${
+              className={`rounded-2xl border p-4 shadow-lg shadow-black/20 backdrop-blur-md transition-all ${
                 done
                   ? "border-emerald-400/40 bg-emerald-400/10"
-                  : "border-white/15 bg-white/5"
+                  : "border-white/10 bg-white/5"
               }`}
             >
               <div className="flex items-start gap-3">
@@ -78,7 +78,7 @@ export function MissionsScreen({
                     Reward: 💰 {m.rewardCoins} · ✨ {m.rewardXp} XP
                   </p>
                   {/* Progress bar — shown whether done or not */}
-                  <div className="mt-2 overflow-hidden rounded-full bg-white/10 h-1.5">
+                  <div className="mt-2 h-1.5 overflow-hidden rounded-full bg-black/30">
                     <motion.div
                       className={`h-full rounded-full ${done ? "bg-emerald-400" : "bg-gold-400"}`}
                       initial={{ width: 0 }}
@@ -95,7 +95,7 @@ export function MissionsScreen({
           );
         })}
 
-        <div className="rounded-2xl border border-white/10 bg-white/5 p-4 text-center text-sm text-white/60">
+        <div className="rounded-2xl border border-white/10 bg-white/5 p-4 text-center text-sm text-white/60 backdrop-blur-md">
           Missions complete automatically during your run. Finished missions pay
           out on the Rewards screen.
         </div>

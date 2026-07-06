@@ -340,8 +340,461 @@ export const BOARDS: BoardDef[] = [
     rarity: "kingdom",
     lore: "The kingdom of the world has become the kingdom of our Lord — and He shall reign forever.",
   },
+
+  // ---- Phase 8 premium decks (each carries its own glory trail) ----
+  {
+    id: "gloryFire",
+    name: "Glory Fire Board",
+    cost: 5500,
+    text: "HEB 12:29",
+    emblem: "🔥",
+    desc: "Ember deck wrapped in a Glory Fire trail.",
+    color: "#ea580c",
+    edge: "#fdba74",
+    trail: "#fb923c",
+    rarity: "legendary",
+    lore: "For our God is a consuming fire — His glory burning behind every step.",
+  },
+  {
+    id: "livingWaterBoard",
+    name: "Living Water Board",
+    cost: 6000,
+    text: "JOHN 7:38",
+    emblem: "💦",
+    desc: "Aqua deck with a flowing Living Water trail.",
+    color: "#0891b2",
+    edge: "#a5f3fc",
+    trail: "#67e8f9",
+    rarity: "legendary",
+    lore: "Out of his heart shall flow rivers of living water.",
+  },
+  {
+    id: "angelWing",
+    name: "Angel Wing Board",
+    cost: 8000,
+    text: "PS 91:11",
+    emblem: "🕊️",
+    desc: "Pearl-white deck with a feathered Angel Wing trail.",
+    color: "#e5e7eb",
+    edge: "#ffffff",
+    trail: "#f1f5f9",
+    rarity: "legendary",
+    lore: "He shall give his angels charge over thee, to keep thee in all thy ways.",
+  },
+  {
+    id: "royalPurple",
+    name: "Royal Purple Board",
+    cost: 9500,
+    text: "1 PET 2:9",
+    emblem: "💜",
+    desc: "Deep purple deck with a Royal Purple light trail.",
+    color: "#7c3aed",
+    edge: "#ddd6fe",
+    trail: "#c4b5fd",
+    rarity: "legendary",
+    lore: "A chosen generation, a royal priesthood, a holy nation.",
+  },
+  {
+    id: "crossOfVictory",
+    name: "Cross of Victory Board",
+    cost: 18000,
+    text: "1 COR 15:57",
+    emblem: "✝️",
+    desc: "Radiant gold-and-white deck with a Crown Spark trail.",
+    color: "#f59e0b",
+    edge: "#fffbeb",
+    trail: "#fde68a",
+    rarity: "kingdom",
+    lore: "Thanks be to God, which giveth us the victory through our Lord Jesus Christ.",
+  },
+  {
+    id: "throneRoomGold",
+    name: "Throne Room Gold Board",
+    cost: 25000,
+    text: "REV 4:2",
+    emblem: "🏛️",
+    desc: "Molten-gold throne deck with a Revival Flame trail.",
+    color: "#d97706",
+    edge: "#fef3c7",
+    trail: "#fbbf24",
+    rarity: "kingdom",
+    lore: "And behold, a throne was set in heaven, and One sat on the throne.",
+  },
+  {
+    id: "newJerusalemCrystal",
+    name: "New Jerusalem Crystal Board",
+    cost: 35000,
+    text: "REV 21:11",
+    emblem: "💎",
+    desc: "Jasper-clear crystal deck with a Scripture Light trail.",
+    color: "#22d3ee",
+    edge: "#ecfeff",
+    trail: "#a5f3fc",
+    rarity: "kingdom",
+    lore: "Her light was like a stone most precious, clear as crystal.",
+  },
+  {
+    id: "eternalCrown",
+    name: "Eternal Crown Board",
+    cost: 50000,
+    text: "REV 22:5",
+    emblem: "👑",
+    desc: "The ultimate deck — pure glory with a Kingdom Lightning trail.",
+    color: "#fbbf24",
+    edge: "#ffffff",
+    trail: "#fef08a",
+    rarity: "kingdom",
+    lore: "And they shall reign for ever and ever — the eternal crown of the redeemed.",
+  },
+
+  // ---- Phase 9 collection expansion (to 50+ boards) ----
+  // Rare — the names of Jesus
+  {
+    id: "breadOfLife", name: "Bread of Life Board", cost: 320, text: "JOHN 6:35",
+    emblem: "🍞", desc: "Warm wheat deck with a nourishing golden trail.",
+    color: "#d4a017", edge: "#fde68a", trail: "#fef3c7", rarity: "rare",
+    lore: "I am the bread of life: he that cometh to me shall never hunger.",
+  },
+  {
+    id: "goodShepherdPasture", name: "Good Shepherd Board", cost: 360, text: "JOHN 10:11",
+    emblem: "🐑", desc: "Soft green pasture deck with a gentle wool-white trail.",
+    color: "#4d7c0f", edge: "#d9f99d", trail: "#ecfccb", rarity: "rare",
+    lore: "I am the good shepherd: the good shepherd giveth his life for the sheep.",
+  },
+  {
+    id: "trueVine", name: "True Vine Board", cost: 400, text: "JOHN 15:5",
+    emblem: "🍇", desc: "Vineyard purple deck with a trailing leaf-green vine.",
+    color: "#6d28d9", edge: "#c4b5fd", trail: "#a7f3d0", rarity: "rare",
+    lore: "I am the vine, ye are the branches: abide in me, and bring forth fruit.",
+  },
+  {
+    id: "lightOfWorld", name: "Light of the World Board", cost: 450, text: "JOHN 8:12",
+    emblem: "💡", desc: "Bright white deck blazing a sunbeam trail.",
+    color: "#fef9c3", edge: "#fde047", trail: "#fffbeb", rarity: "rare",
+    lore: "I am the light of the world: he that followeth me shall have the light of life.",
+  },
+  {
+    id: "rockOfAges", name: "Rock of Ages Board", cost: 500, text: "PS 18:2",
+    emblem: "⛰️", desc: "Stone-grey deck, unshakable, with a steady silver trail.",
+    color: "#64748b", edge: "#cbd5e1", trail: "#e2e8f0", rarity: "rare",
+    lore: "The LORD is my rock, and my fortress, and my deliverer.",
+  },
+  {
+    id: "princeOfPeace", name: "Prince of Peace Board", cost: 600, text: "ISA 9:6",
+    emblem: "🕊️", desc: "Calm sky-blue deck with a peaceful dove-white trail.",
+    color: "#0ea5e9", edge: "#bae6fd", trail: "#f0f9ff", rarity: "rare",
+    lore: "And his name shall be called Wonderful, Counsellor... The Prince of Peace.",
+  },
+  // Epic
+  {
+    id: "alphaOmegaCosmic", name: "Alpha & Omega Board", cost: 1800, text: "REV 1:8",
+    emblem: "🔱", desc: "Deep cosmic deck with a swirling beginning-and-end trail.",
+    color: "#4338ca", edge: "#a5b4fc", trail: "#e0e7ff", rarity: "epic",
+    lore: "I am Alpha and Omega, the beginning and the ending, saith the Lord.",
+  },
+  {
+    id: "brightMorningStar", name: "Bright Morning Star Board", cost: 2200, text: "REV 22:16",
+    emblem: "🌟", desc: "Dawn-violet deck with a shimmering starlight trail.",
+    color: "#7c3aed", edge: "#ddd6fe", trail: "#fef9c3", rarity: "epic",
+    lore: "I am the root and the offspring of David, and the bright and morning star.",
+  },
+  {
+    id: "roseOfSharon", name: "Rose of Sharon Board", cost: 2600, text: "SONG 2:1",
+    emblem: "🌹", desc: "Blush-rose deck with a soft petal trail.",
+    color: "#e11d48", edge: "#fecdd3", trail: "#ffe4e6", rarity: "epic",
+    lore: "I am the rose of Sharon, and the lily of the valleys.",
+  },
+  {
+    id: "cornerstone", name: "Chief Cornerstone Board", cost: 3000, text: "EPH 2:20",
+    emblem: "🧱", desc: "Hewn-gold stone deck with a foundation-light trail.",
+    color: "#b45309", edge: "#fcd34d", trail: "#fef3c7", rarity: "epic",
+    lore: "Jesus Christ himself being the chief corner stone.",
+  },
+  {
+    id: "wonderfulCounselor", name: "Wonderful Counselor Board", cost: 3400, text: "ISA 9:6",
+    emblem: "📖", desc: "Wisdom-indigo deck with a guiding light trail.",
+    color: "#3730a3", edge: "#c7d2fe", trail: "#e0e7ff", rarity: "epic",
+    lore: "His name shall be called Wonderful, Counsellor, The mighty God.",
+  },
+  {
+    id: "refugeStrength", name: "Refuge & Strength Board", cost: 3800, text: "PS 46:1",
+    emblem: "🏔️", desc: "Mountain-teal deck with a sheltering mist trail.",
+    color: "#0d9488", edge: "#99f6e4", trail: "#ccfbf1", rarity: "epic",
+    lore: "God is our refuge and strength, a very present help in trouble.",
+  },
+  // Legendary
+  {
+    id: "lionOfJudahElite", name: "Lion of Judah Elite Board", cost: 6500, text: "REV 5:5",
+    emblem: "🦁", desc: "Royal black-and-gold deck with a roaring mane trail.",
+    color: "#1c1917", edge: "#f59e0b", trail: "#fbbf24", rarity: "legendary",
+    lore: "Behold, the Lion of the tribe of Juda... hath prevailed.",
+  },
+  {
+    id: "mightyFortress", name: "A Mighty Fortress Board", cost: 7000, text: "PS 91:2",
+    emblem: "🏰", desc: "Stone-bronze fortress deck with a battlement light trail.",
+    color: "#78350f", edge: "#fcd34d", trail: "#fde68a", rarity: "legendary",
+    lore: "I will say of the LORD, He is my refuge and my fortress: in him will I trust.",
+  },
+  {
+    id: "bannerOfLove", name: "Banner of Love Board", cost: 8500, text: "SONG 2:4",
+    emblem: "🎏", desc: "Crimson-and-cream deck flying a banner-of-love trail.",
+    color: "#be123c", edge: "#fda4af", trail: "#ffe4e6", rarity: "legendary",
+    lore: "He brought me to the banqueting house, and his banner over me was love.",
+  },
+  {
+    id: "everlastingArms", name: "Everlasting Arms Board", cost: 10000, text: "DEUT 33:27",
+    emblem: "🤲", desc: "Warm amber deck upheld by an everlasting-light trail.",
+    color: "#d97706", edge: "#fef3c7", trail: "#fffbeb", rarity: "legendary",
+    lore: "The eternal God is thy refuge, and underneath are the everlasting arms.",
+  },
+  // Kingdom — major goals
+  {
+    id: "heavenlyMessenger", name: "Heavenly Messenger Board", cost: 16000, text: "LUKE 2:10",
+    emblem: "👼", desc: "Radiant white-gold deck trailing angelic glory light.",
+    color: "#fafafa", edge: "#fde047", trail: "#fef9c3", rarity: "kingdom",
+    lore: "Fear not: for, behold, I bring you good tidings of great joy.",
+  },
+  {
+    id: "crownOfGlory", name: "Crown of Glory Board", cost: 22000, text: "1 PET 5:4",
+    emblem: "👑", desc: "Imperial purple-gold deck with a crowning glory trail.",
+    color: "#581c87", edge: "#fde68a", trail: "#fffbeb", rarity: "kingdom",
+    lore: "Ye shall receive a crown of glory that fadeth not away.",
+  },
+  {
+    id: "seaOfGlass", name: "Sea of Glass Board", cost: 30000, text: "REV 4:6",
+    emblem: "🪞", desc: "Mirror-crystal deck with a glassy heaven-light trail.",
+    color: "#06b6d4", edge: "#cffafe", trail: "#ffffff", rarity: "kingdom",
+    lore: "And before the throne there was a sea of glass like unto crystal.",
+  },
+  {
+    id: "treeOfLife", name: "Tree of Life Board", cost: 40000, text: "REV 22:2",
+    emblem: "🌳", desc: "Eden-emerald deck bearing a twelve-fruit light trail.",
+    color: "#15803d", edge: "#bbf7d0", trail: "#fef9c3", rarity: "kingdom",
+    lore: "The tree of life... and the leaves were for the healing of the nations.",
+  },
+  // ---- Phase 16.5 Premium "Beast" Cosmetic Boards ----
+  {
+    id: "lionOfJudahBeast",
+    name: "Lion of Judah Beast",
+    cost: 999,
+    iapProductId: "board_lion_999",
+    scripture: "Revelation 5:5",
+    text: "REV 5:5",
+    emblem: "🦁",
+    desc: "Board shaped like lion's head, golden mane trail, regal crest",
+    color: "#d4af37",
+    edge: "#a97620",
+    trail: "#d4af37",
+    rarity: "epic",
+    lore: "Majesty, courage, kingly power. Behold the Lion of the tribe of Judah.",
+    isPremium: true,
+    gameplayMods: {
+      revivalPush: 1.2, // +20% revival push
+    },
+  },
+  {
+    id: "graceWingsBeast",
+    name: "Grace Wings Beast",
+    cost: 999,
+    iapProductId: "board_grace_999",
+    scripture: "Ephesians 2:8",
+    text: "EPH 2:8",
+    emblem: "🕊️",
+    desc: "Board with feathered wings, pearl surface, grace symbols",
+    color: "#f4f1ff",
+    edge: "#daa520",
+    trail: "#f4f1ff",
+    rarity: "epic",
+    lore: "Compassion, protection, divine grace. Under His wings you will find refuge.",
+    isPremium: true,
+    gameplayMods: {
+      dodgeWindow: 1.25, // +25% dodge window
+    },
+  },
+  {
+    id: "mercyHeartBeast",
+    name: "Mercy Heart Beast",
+    cost: 999,
+    iapProductId: "board_mercy_999",
+    scripture: "Lamentations 3:22",
+    text: "LAM 3:22",
+    emblem: "💗",
+    desc: "Heart-shaped board with pulsing glow, compassion motifs",
+    color: "#fb7185",
+    edge: "#f472b6",
+    trail: "#fb7185",
+    rarity: "epic",
+    lore: "Compassion, healing, new beginnings. His mercies are new every morning.",
+    isPremium: true,
+    gameplayMods: {
+      reviverCharge: 1.2, // +20% extra revival charge
+    },
+  },
+  {
+    id: "faithTrailBeast",
+    name: "Faith Trail Beast",
+    cost: 1299,
+    iapProductId: "board_faith_1299",
+    scripture: "2 Corinthians 5:7",
+    text: "2 COR 5:7",
+    emblem: "🛤️",
+    desc: "Board with path map, glowing runes, explorer aesthetic",
+    color: "#0d9488",
+    edge: "#06b6d4",
+    trail: "#0d9488",
+    rarity: "epic",
+    lore: "Journey, discovery, trust. For we walk by faith, not by sight.",
+    isPremium: true,
+    gameplayMods: {
+      treasureReveal: 1.15, // +15% hidden treasure reveal
+    },
+  },
+  {
+    id: "kingdomSurgeBeast",
+    name: "Kingdom Surge Beast",
+    cost: 1499,
+    iapProductId: "board_surge_1499",
+    scripture: "Isaiah 40:31",
+    text: "ISA 40:31",
+    emblem: "⚡",
+    desc: "Board crackling with kingdom energy, power glyph",
+    color: "#8b5cf6",
+    edge: "#7c3aed",
+    trail: "#8b5cf6",
+    rarity: "legendary",
+    lore: "Power, ascension, divine strength. They mount up with wings as eagles.",
+    isPremium: true,
+    gameplayMods: {
+      powerUpDuration: 1.3, // +30% power-up duration
+    },
+  },
+  {
+    id: "heavenlyPraiseBeast",
+    name: "Heavenly Praise Beast",
+    cost: 1499,
+    iapProductId: "board_praise_1499",
+    scripture: "Psalm 46:10",
+    text: "PS 46:10",
+    emblem: "🎵",
+    desc: "Board adorned with musical notation, harmonic symbols",
+    color: "#3b82f6",
+    edge: "#1e40af",
+    trail: "#3b82f6",
+    rarity: "legendary",
+    lore: "Peace, worship, divine presence. Be still, and know that I am God.",
+    isPremium: true,
+    gameplayMods: {
+      fearReduction: 1.4, // +40% fear reduction effect
+    },
+  },
+  {
+    id: "revivalFireBeast",
+    name: "Revival Fire Beast",
+    cost: 1999,
+    iapProductId: "board_revival_1999",
+    scripture: "Malachi 4:2",
+    text: "MAL 4:2",
+    emblem: "🔥",
+    desc: "Board wreathed in eternal flame, suns circling, crest of power",
+    color: "#f59e0b",
+    edge: "#dc2626",
+    trail: "#ff6b6b",
+    rarity: "kingdom",
+    lore: "Ultimate power, transformation, final victory. The sun of righteousness shall arise.",
+    isPremium: true,
+    seasonal: "limited",
+    gameplayMods: {
+      accuserRepel: 1.5, // +50% accuser repel (LEGENDARY POWER)
+    },
+  },
+  // Seasonal Beast Boards
+  {
+    id: "pentecostFireBoard",
+    name: "Pentecost Fire Board",
+    cost: 1999,
+    iapProductId: "board_pentecost_1999",
+    scripture: "Acts 2:3-4",
+    text: "ACTS 2:3",
+    emblem: "🔥",
+    desc: "Board consumed by holy fire, divine language symbols",
+    color: "#ff6b6b",
+    edge: "#ffa500",
+    trail: "#ff6b6b",
+    rarity: "kingdom",
+    lore: "Divine power, transformation, holy spirit. Tongues of fire descending.",
+    isPremium: true,
+    seasonal: "pentecost",
+    gameplayMods: {
+      powerUpDuration: 1.2,
+    },
+  },
+  {
+    id: "resurrectionGoldBoard",
+    name: "Resurrection Gold Board",
+    cost: 2499,
+    iapProductId: "board_resurrection_2499",
+    scripture: "John 11:25",
+    text: "JOHN 11:25",
+    emblem: "🌅",
+    desc: "Board glowing with resurrection light, victory symbols",
+    color: "#ffd700",
+    edge: "#daa520",
+    trail: "#ffd700",
+    rarity: "kingdom",
+    lore: "Hope, victory, eternal life. I am the resurrection and the life.",
+    isPremium: true,
+    seasonal: "easter",
+    gameplayMods: {
+      powerUpDuration: 1.15,
+    },
+  },
+  {
+    id: "kingdomAnniversaryBoard",
+    name: "Kingdom Anniversary Board",
+    cost: 2999,
+    iapProductId: "board_anniversary_2999",
+    scripture: "Psalm 100",
+    text: "PS 100",
+    emblem: "🎉",
+    desc: "Board with anniversary crest, achievement markers",
+    color: "#d4af37",
+    edge: "#ff6b6b",
+    trail: "#d4af37",
+    rarity: "kingdom",
+    lore: "Community, achievement, gratitude. Celebrating one year of faith, running in the light.",
+    isPremium: true,
+    seasonal: "anniversary",
+    gameplayMods: {
+      revivalPush: 1.15,
+    },
+  },
 ];
 
 export function getBoard(id: string): BoardDef {
   return BOARDS.find((b) => b.id === id) ?? BOARDS[0];
+}
+
+/**
+ * Codex review fix (PR #3, P2) — board ownership/equip state and React list
+ * keys all key off `b.id`, so a duplicate id would let one purchase mark
+ * two boards owned and make equip target the wrong deck. Guards against
+ * regressions the same way the id collision was found: a plain scan for
+ * repeated ids. Called once in dev (see below); no-op in production builds.
+ */
+export function findDuplicateBoardIds(): string[] {
+  const seen = new Set<string>();
+  const dupes = new Set<string>();
+  for (const b of BOARDS) {
+    if (seen.has(b.id)) dupes.add(b.id);
+    seen.add(b.id);
+  }
+  return [...dupes];
+}
+
+if (import.meta.env?.DEV) {
+  const dupes = findDuplicateBoardIds();
+  if (dupes.length > 0) {
+    // eslint-disable-next-line no-console
+    console.error("[boards] duplicate board ids detected:", dupes);
+  }
 }

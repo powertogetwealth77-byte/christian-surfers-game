@@ -10,12 +10,21 @@ import type {
 } from "../types";
 import { MISSIONS, missionProgress } from "../data/missions";
 import { SCRIPTURES } from "../data/scriptures";
+import { getShoe } from "../data/shoes";
 import { COMMON_POWER_UPS, PREMIUM_POWER_UPS } from "../data/powerups";
 import {
   BASE_SPEED,
+  BREAKTHROUGH_COINS,
+  BREAKTHROUGH_COINS_DEV,
+  BREAKTHROUGH_DURATION,
+  BREAKTHROUGH_SATAN_PUSH,
   COMBO_MAX_BONUS,
   COMBO_STEP,
   COMBO_TIMEOUT,
+  FINISH_APPROACH_WARN,
+  FINISH_GATE_WARN,
+  FINISH_LINE_TIME,
+  FINISH_LINE_TIME_DEV,
   GRAVITY,
   HIT_Z,
   JUMP_VELOCITY,
@@ -80,7 +89,18 @@ export type GameEvent =
   | { type: "missionComplete"; title: string }
   | { type: "combo"; count: number }
   | { type: "perfectDodge"; streak: number }
-  | { type: "faithStreak"; count: number };
+  | { type: "faithStreak"; count: number }
+  | { type: "shoeBonus"; coins: number }
+  | { type: "finishLineApproach" }   // 60s warning
+  | { type: "finishLineGate" }        // 15s warning — heavenly gate
+  | { type: "finishLine" }            // finish reached — pause and encounter
+  | { type: "breakthrough"; coins: number }; // 200-coin Breakthrough moment
+
+// Scripture Shoe balance clamps (Phase 15.5 §6) — shoes feel valuable but
+// can never make the game uncontrollable or the player permanently invincible.
+const SHOE_SPEED_MAX = 0.2; // +20% movement at most
+const SHOE_COIN_MAX = 0.5; // +50% streak coin reward at most
+const SHOE_PROTECT_MAX = 8; // 8 seconds of Spirit protection at most
 
 interface AbilityMods {
   startShield: boolean;
@@ -88,23 +108,25 @@ interface AbilityMods {
   revivalPushMult: number;
   jumpMult: number;
   gravityMult: number;
-  royalFavorChance: number;
-  obstacleScoreMult: number;
+  extraRevival: number; // bonus Revival Fire charges granted at run start
 }
 
 function abilityMods(character: CharacterDef): AbilityMods {
+  const id = character.id;
   return {
-    startShield: character.id === "zion",
-    durationMult: character.id === "grace" ? 1.25 : 1,
-    revivalPushMult: character.id === "judah" ? 2 : 1,
-    jumpMult: character.id === "kai" ? 1.18 : 1,
-    gravityMult: character.id === "kai" ? 0.88 : 1,
-    royalFavorChance: character.id === "esther" ? 0.22 : 0,
-    obstacleScoreMult: character.id === "david" ? 1.5 : 1,
+    // Zion, Mercy, Malachi, Samuel (Voice of Truth), Esther (Courage Crown) begin shielded.
+    startShield: id === "zion" || id === "mercy" || id === "malachi" || id === "samuel" || id === "esther",
+    // Grace & Selah make blessings linger longer; Esther's Courage Crown extends them too.
+    durationMult: id === "grace" ? 1.25 : id === "selah" ? 1.3 : id === "esther" ? 1.15 : 1,
+    // Judah & Malachi drive the Accuser further back; Samuel's truth exposes and pushes him.
+    revivalPushMult: id === "judah" ? 2 : id === "malachi" ? 2.5 : id === "samuel" ? 1.5 : 1,
+    // Kai & David (Giant Slayer) leap higher and glide.
+    jumpMult: id === "kai" || id === "david" ? 1.18 : 1,
+    gravityMult: id === "kai" || id === "david" ? 0.88 : 1,
+    // Mercy & Malachi carry an extra Revival Fire charge.
+    extraRevival: id === "mercy" || id === "malachi" ? 1 : 0,
   };
 }
-
-const OBSTACLE_DEFEAT_SCORE = 90;
 
 const OBSTACLE_TABLE: { kind: ObstacleKind; profile: ObstacleProfile }[] = [
   { kind: "fallenCrate", profile: "jump" },
@@ -138,6 +160,12 @@ export class GameEngine {
   pickups: PowerUpPickup[] = [];
   private spawnCursor = 26; // distance at which the next chunk spawns
 
+  // Phase 16 — finish line
+  readonly finishLineAt: number; // seconds of active run time
+  finishLineReached = false;
+  private finishApproachFired = false;
+  private finishGateFired = false;
+
   // Satan
   satan = SATAN_START; // 0..1 proximity
   private warned = false;
@@ -151,6 +179,10 @@ export class GameEngine {
   sprintTimer = 0; // Holy Sprint
   surgeTimer = 0; // Kingdom Surge
   invincibleTimer = 0; // Angel Dash
+  spiritTimer = 0; // Spirit of the Lord protection (granted via shoes)
+  breakthroughTimer = 0; // 200-coin Breakthrough board blaze
+  private breakthroughFired = false; // one-shot per run
+  private breakthroughAt = BREAKTHROUGH_COINS;
   revivalCharges = 1; // manual boost button
 
   // Streaks
@@ -190,6 +222,8 @@ export class GameEngine {
     shieldsUsed: 0,
     surviveSeconds: 0,
     scripturesSeen: [],
+    scripturesHeard: {},
+    scriptureLastHeardUpdates: {},
     missionsCompleted: [],
     xpEarned: 0,
   };
@@ -202,7 +236,11 @@ export class GameEngine {
   private extraDuration: number;
   private scriptureIdx = 0;
   private completedBefore: Set<string>;
-  private royalFavorUsed = false;
+
+  // Equipped Scripture Shoe effects (clamped at construction — Phase 15.5).
+  readonly shoeSpeedBoost: number;
+  readonly shoeCoinBonus: number;
+  readonly shoeProtectSecs: number;
 
   constructor(character: CharacterDef, save: SaveData) {
     this.mods = abilityMods(character);
@@ -211,9 +249,34 @@ export class GameEngine {
     this.satanRiseMult = 1 - 0.18 * (up.graceWindow ?? 0);
     this.extraDuration = 1.5 * (up.powerDuration ?? 0);
     this.completedBefore = new Set(save.completedMissions);
+
+    // Read the equipped shoe and apply balance clamps. Falls back to the
+    // default shoe if none is set, so an empty/legacy save is fully safe.
+    const shoe = getShoe(save.equippedShoe ?? "gospelSprint");
+    // Phase 16.5: Use new gameplayMods system (multipliers) if available,
+    // otherwise fall back to legacy speedBoost/coinStreak/shieldSecs fields
+    const speedMult = shoe.gameplayMods?.speedMult ?? 1.0;
+    const coinMult = shoe.gameplayMods?.coinMagnetRange ?? 1.0;
+    const shieldMult = shoe.gameplayMods?.shieldDuration ?? 1.0;
+    // Multipliers are 1.05–1.4; the engine clamps expect fractional boosts
+    // (0.05–0.4) and seconds — convert, don't scale by 100.
+    this.shoeSpeedBoost = Math.max(0, Math.min(SHOE_SPEED_MAX, speedMult - 1.0));
+    this.shoeCoinBonus = Math.max(0, Math.min(SHOE_COIN_MAX, coinMult - 1.0));
+    this.shoeProtectSecs = Math.max(0, Math.min(SHOE_PROTECT_MAX, (shieldMult - 1.0) * 10));
     if (this.mods.startShield) this.shieldCharges = 1;
     else if (Math.random() < 0.33 * (up.shieldStart ?? 0)) this.shieldCharges = 1;
+    this.revivalCharges += this.mods.extraRevival;
     this.scriptureIdx = Math.floor(Math.random() * SCRIPTURES.length);
+    // Dev shortcut: ?finishTest in URL → finish line after 30 seconds.
+    const isDevMode =
+      typeof window !== "undefined" &&
+      window.location.search.includes("finishTest");
+    this.finishLineAt = isDevMode ? FINISH_LINE_TIME_DEV : FINISH_LINE_TIME;
+    // Dev shortcut: ?breakthroughTest → Breakthrough fires at 15 coins.
+    const breakthroughDev =
+      typeof window !== "undefined" &&
+      window.location.search.includes("breakthroughTest");
+    this.breakthroughAt = breakthroughDev ? BREAKTHROUGH_COINS_DEV : BREAKTHROUGH_COINS;
   }
 
   private duration(base: number): number {
@@ -257,6 +320,16 @@ export class GameEngine {
     this.events.push({ type: "slide" });
   }
 
+  /**
+   * Grant Spirit of the Lord protection for `secs` seconds (from a shoe's
+   * shieldSecs). Clamped to the balance ceiling and never reduces an existing
+   * longer protection. No-op when the equipped shoe grants no protection.
+   */
+  activateSpiritProtection(secs: number) {
+    if (!this.alive || secs <= 0) return;
+    this.spiritTimer = Math.max(this.spiritTimer, Math.min(SHOE_PROTECT_MAX, secs));
+  }
+
   /** Manual boost button: unleash a stored Revival Fire. */
   useRevival(): boolean {
     if (!this.alive || this.revivalCharges <= 0 || this.revivalTimer > 0) {
@@ -279,6 +352,9 @@ export class GameEngine {
     let speedMult = this.revivalTimer > 0 ? 1.15 : 1;
     if (this.sprintTimer > 0) speedMult *= 1.4;
     if (this.surgeTimer > 0) speedMult *= 1.25;
+    if (this.breakthroughTimer > 0) speedMult *= 1.35;
+    // Equipped shoe gives a gentle, always-on movement boost (clamped ≤20%).
+    speedMult *= 1 + this.shoeSpeedBoost;
     const effSpeed = this.speed * speedMult;
 
     const dDist = effSpeed * dt;
@@ -307,6 +383,8 @@ export class GameEngine {
     this.sprintTimer = Math.max(0, this.sprintTimer - dt);
     this.surgeTimer = Math.max(0, this.surgeTimer - dt);
     this.invincibleTimer = Math.max(0, this.invincibleTimer - dt);
+    this.spiritTimer = Math.max(0, this.spiritTimer - dt);
+    this.breakthroughTimer = Math.max(0, this.breakthroughTimer - dt);
 
     // Combo streak fizzles if you stop collecting.
     if (this.combo > 0) {
@@ -316,7 +394,8 @@ export class GameEngine {
 
     // Satan creeps closer; faster the longer you run.
     // He can't keep pace while you sprint or surge.
-    const outrunning = this.sprintTimer > 0 || this.surgeTimer > 0;
+    const outrunning =
+      this.sprintTimer > 0 || this.surgeTimer > 0 || this.breakthroughTimer > 0;
     if (this.satan < SATAN_SOFT_CAP && !outrunning) {
       this.satan = Math.min(
         SATAN_SOFT_CAP,
@@ -331,6 +410,24 @@ export class GameEngine {
       this.events.push({ type: "satanWarning" });
     }
     if (this.satan < SATAN_WARN_AT - 0.1) this.warned = false;
+
+    // Phase 16 — finish line approach warnings and trigger
+    if (!this.finishLineReached) {
+      const remaining = this.finishLineAt - this.elapsed;
+      if (!this.finishApproachFired && remaining <= FINISH_APPROACH_WARN) {
+        this.finishApproachFired = true;
+        this.events.push({ type: "finishLineApproach" });
+      }
+      if (!this.finishGateFired && remaining <= FINISH_GATE_WARN) {
+        this.finishGateFired = true;
+        this.events.push({ type: "finishLineGate" });
+      }
+      if (this.elapsed >= this.finishLineAt) {
+        this.finishLineReached = true;
+        this.finished = true;
+        this.events.push({ type: "finishLine" });
+      }
+    }
 
     this.spawn();
     this.advance(dDist);
@@ -425,14 +522,16 @@ export class GameEngine {
       if (this.revivalTimer > 0 && ob.z < 8 && ob.lane === this.lane) {
         ob.burned = true;
         this.stats.dodges++;
-        this.awardObstacleDefeat();
         continue;
       }
-      // Angel Dash phases straight through danger.
-      if (this.invincibleTimer > 0 && ob.z < HIT_Z && ob.lane === this.lane) {
+      // Angel Dash or Spirit of the Lord protection phases through danger.
+      if (
+        (this.invincibleTimer > 0 || this.spiritTimer > 0) &&
+        ob.z < HIT_Z &&
+        ob.lane === this.lane
+      ) {
         ob.burned = true;
         this.stats.dodges++;
-        this.awardObstacleDefeat();
         continue;
       }
       if (!ob.passed && ob.z < HIT_Z && ob.z > -0.5) {
@@ -444,7 +543,6 @@ export class GameEngine {
       if (!ob.passed && ob.z <= -0.5) {
         ob.passed = true;
         this.stats.dodges++;
-        this.awardObstacleDefeat();
         // Perfect dodge: cleared an obstacle in your own lane by
         // jumping over or sliding under it at the last moment.
         if (this.alive && Math.abs(this.laneX - ob.lane) < 0.6) {
@@ -504,14 +602,9 @@ export class GameEngine {
   }
 
   private crash() {
-    if (
-      this.mods.royalFavorChance > 0 &&
-      !this.royalFavorUsed &&
-      Math.random() < this.mods.royalFavorChance
-    ) {
-      this.royalFavorUsed = true;
-      this.satan = Math.min(SATAN_SOFT_CAP, this.satan + 0.08);
-      this.events.push({ type: "stumble" });
+    // Spirit of the Lord protection: obstacles cannot end the run while active.
+    if (this.spiritTimer > 0) {
+      this.stats.dodges++;
       return;
     }
     // Any hit breaks your streaks.
@@ -536,12 +629,15 @@ export class GameEngine {
     if (this.combo > this.stats.bestCombo) this.stats.bestCombo = this.combo;
     if (this.combo > 0 && this.combo % 10 === 0) {
       this.events.push({ type: "combo", count: this.combo });
+      // Coin-streak shoe bonus: a small batch of extra coins each 10-combo
+      // milestone. Awarded once per milestone so it never spams the player.
+      if (this.shoeCoinBonus > 0) {
+        const bonus = Math.max(1, Math.round(10 * this.shoeCoinBonus));
+        this.stats.coins += bonus;
+        this.stats.score += SCORE_COIN * bonus * this.coinValueMult;
+        this.events.push({ type: "shoeBonus", coins: bonus });
+      }
     }
-  }
-
-  private awardObstacleDefeat(multiplier = 1) {
-    this.stats.score +=
-      OBSTACLE_DEFEAT_SCORE * this.mods.obstacleScoreMult * multiplier * this.scoreMult;
   }
 
   private collect(kind: CollectibleKind) {
@@ -552,6 +648,14 @@ export class GameEngine {
         this.stats.coins++;
         this.stats.score += SCORE_COIN * this.coinValueMult * mult;
         this.events.push({ type: "coin" });
+        // 200-coin BREAKTHROUGH — once per run, checked only when a coin
+        // lands (not per-frame), >= because batch bonuses can skip past it.
+        if (!this.breakthroughFired && this.stats.coins >= this.breakthroughAt) {
+          this.breakthroughFired = true;
+          this.breakthroughTimer = BREAKTHROUGH_DURATION;
+          this.satan = Math.max(0.05, this.satan - BREAKTHROUGH_SATAN_PUSH);
+          this.events.push({ type: "breakthrough", coins: this.stats.coins });
+        }
         break;
       case "scroll": {
         this.stats.scrolls++;
@@ -622,7 +726,6 @@ export class GameEngine {
           if (!ob.burned && !ob.passed && ob.lane === this.lane && ob.z > 0) {
             ob.burned = true;
             this.stats.dodges++;
-            this.awardObstacleDefeat();
           }
         }
         break;
