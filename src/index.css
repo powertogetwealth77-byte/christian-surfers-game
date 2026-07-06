@@ -67,3 +67,69 @@ body {
     transform: translateX(120%);
   }
 }
+
+/* ── Phase 16.6 — Holographic 3D skateboard cosmetics ─────────────────────── */
+
+/* Iridescent rainbow sheen sweeping across the deck. */
+@keyframes holo-sweep {
+  0% {
+    transform: translateX(-60%) rotate(8deg);
+  }
+  100% {
+    transform: translateX(60%) rotate(8deg);
+  }
+}
+
+/* Slow hue rotation so the holo film keeps shifting color like real foil. */
+@keyframes holo-hue {
+  0% {
+    filter: hue-rotate(0deg);
+  }
+  100% {
+    filter: hue-rotate(360deg);
+  }
+}
+
+/* Gentle 3D idle float + tilt wobble for the board in menus. */
+@keyframes holo-float {
+  0%,
+  100% {
+    transform: rotateX(54deg) rotateZ(-38deg) translateZ(0) translateY(0);
+  }
+  50% {
+    transform: rotateX(54deg) rotateZ(-38deg) translateZ(0) translateY(-7px);
+  }
+}
+
+.holo-board-stage {
+  perspective: 620px;
+  perspective-origin: 50% 42%;
+}
+
+.holo-board-deck {
+  transform: rotateX(54deg) rotateZ(-38deg);
+  transform-style: preserve-3d;
+  animation: holo-float 4.6s ease-in-out infinite;
+  will-change: transform;
+}
+
+.holo-board-sheen {
+  animation: holo-sweep 3.1s ease-in-out infinite alternate;
+  mix-blend-mode: screen;
+  will-change: transform;
+}
+
+.holo-board-foil {
+  animation: holo-hue 7.5s linear infinite;
+  mix-blend-mode: color-dodge;
+}
+
+@media (prefers-reduced-motion: reduce) {
+  .holo-board-deck {
+    animation: none;
+  }
+  .holo-board-sheen,
+  .holo-board-foil {
+    animation: none;
+  }
+}

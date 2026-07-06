@@ -1,4 +1,4 @@
-import type { BoardDef, CharacterDef } from "../types";
+import type { BoardDef, CharacterDef, VenueDef } from "../types";
 import type { Collectible, GameEngine, Obstacle, PowerUpPickup } from "./engine";
 import { MAX_SPEED, SPAWN_Z } from "./constants";
 
@@ -42,12 +42,35 @@ export class Renderer {
   private camX = 0; // live camera offset
   private camY = 0;
   private board: BoardDef | null = null; // equipped scripture board
+  private venue: VenueDef | null = null; // selected environment theme
   private punchT = 0; // transient camera zoom punch 0..1
   shake = 0;
+  // Phase 16.8 — painted venue backdrops, cached across venue switches so a
+  // revisited venue never re-fetches. Keyed by src; missing/loading entries
+  // gracefully fall back to the hand-drawn procedural backdrop.
+  private static bgImageCache: Map<string, HTMLImageElement> = new Map();
 
   /** Set the equipped board so its colors, scripture and trail show in play. */
   setBoard(board: BoardDef) {
     this.board = board;
+  }
+
+  /** Set the selected venue so its palette overrides the environment colors. */
+  setVenue(venue: VenueDef) {
+    this.venue = venue;
+    if (venue.bgImage && !Renderer.bgImageCache.has(venue.bgImage)) {
+      const img = new Image();
+      img.src = venue.bgImage;
+      Renderer.bgImageCache.set(venue.bgImage, img);
+    }
+  }
+
+  /** Loaded (paint-ready) backdrop image for the active venue, or null. */
+  private activeBgImage(): HTMLImageElement | null {
+    const src = this.venue?.bgImage;
+    if (!src) return null;
+    const img = Renderer.bgImageCache.get(src);
+    return img && img.complete && img.naturalWidth > 0 ? img : null;
   }
 
   addShake(amount: number) {
@@ -126,22 +149,77 @@ export class Renderer {
         color: "#ffd700",
       });
     }
+    // Brief golden sparkle: small, bright, fast-decaying highlights.
+    const sparkles = Math.max(3, Math.round(count * 0.6));
+    for (let i = 0; i < sparkles; i++) {
+      const a = Math.random() * Math.PI * 2;
+      const sp = 80 + Math.random() * 200;
+      this.particles.push({
+        x: p.x,
+        y: p.y - 20,
+        vx: Math.cos(a) * sp,
+        vy: Math.sin(a) * sp - 120,
+        life: 0,
+        maxLife: 0.22 + Math.random() * 0.18,
+        size: 1 + Math.random() * 1.8,
+        color: "#fffbe0",
+      });
+    }
   }
 
   /** Create a ring burst for power-ups (radial explosion). */
   ringBurst(engine: GameEngine, W: number, H: number, color: string, count = 16) {
     const p = this.project(engine.laneX, 0.5, W, H);
     for (let i = 0; i < count; i++) {
-      const a = (i / count) * Math.PI * 2;
-      const sp = 200 + Math.random() * 150;
+      // Even angular spacing with a tiny jitter for a smoother, rounder ring.
+      const a = (i / count) * Math.PI * 2 + (Math.random() - 0.5) * 0.08;
+      const sp = 210 + Math.random() * 90;
       this.particles.push({
         x: p.x,
         y: p.y - 30,
         vx: Math.cos(a) * sp,
         vy: Math.sin(a) * sp - 40,
         life: 0,
-        maxLife: 0.6 + Math.random() * 0.3,
+        maxLife: 0.65 + Math.random() * 0.25,
         size: 4 + Math.random() * 3,
+        color,
+      });
+    }
+  }
+
+  /** Radiant light burst for victory moments: light rays + sparkle particles. */
+  lightBurst(engine: GameEngine, W: number, H: number, color: string, count = 24) {
+    const p = this.project(engine.laneX, 0.5, W, H);
+    const cx = p.x;
+    const cy = p.y - 40;
+    // Radial light rays: fast, bright, evenly spaced spokes.
+    const rays = Math.min(count, 16);
+    for (let i = 0; i < rays; i++) {
+      const a = (i / rays) * Math.PI * 2;
+      const sp = 320 + Math.random() * 160;
+      this.particles.push({
+        x: cx,
+        y: cy,
+        vx: Math.cos(a) * sp,
+        vy: Math.sin(a) * sp,
+        life: 0,
+        maxLife: 0.45 + Math.random() * 0.2,
+        size: 3 + Math.random() * 2,
+        color: "#ffffff",
+      });
+    }
+    // Colored celebratory particles drifting upward.
+    for (let i = 0; i < count; i++) {
+      const a = Math.random() * Math.PI * 2;
+      const sp = 60 + Math.random() * 200;
+      this.particles.push({
+        x: cx,
+        y: cy,
+        vx: Math.cos(a) * sp,
+        vy: Math.sin(a) * sp - 140,
+        life: 0,
+        maxLife: 0.7 + Math.random() * 0.5,
+        size: 3 + Math.random() * 4,
         color,
       });
     }
@@ -208,14 +286,53 @@ export class Renderer {
     }
     ctx.translate(sx, sy);
 
+    // ---- Venue-aware environment dispatch ----
+    // Sky (already venue-palette + Satan-danger aware) and the road
+    // (drawBoardwalk, venue-palette aware) ALWAYS run. Boardwalk-specific side
+    // props (sea/boats/palms/banners) only run for the boardwalk; each other
+    // venue draws its own unique world-building props to the SIDES / ABOVE the
+    // horizon so the playable center lane is never covered.
+    const vid = this.venue?.id ?? "boardwalk";
     this.drawSky(ctx, W, H, time, engine.satan);
-    this.drawSea(ctx, W, H, time, engine.stats.distance);
-    this.drawBoats(ctx, W, H, time);
-    this.drawSkyline(ctx, W, H, time);
-    this.drawFlock(ctx, W, H, time);
+    const bgImg = this.activeBgImage();
+    if (bgImg) {
+      // Painted photo backdrop is ready — it replaces the hand-drawn
+      // horizon props for this venue (the image already depicts them).
+      this.drawVenueImageBackdrop(ctx, W, H, bgImg);
+    } else if (vid === "boardwalk") {
+      this.drawSea(ctx, W, H, time, engine.stats.distance);
+      this.drawBoats(ctx, W, H, time);
+      this.drawSkyline(ctx, W, H, time);
+      this.drawFlock(ctx, W, H, time);
+    } else if (vid === "city") {
+      this.drawCityBackdrop(ctx, W, H, time);
+    } else if (vid === "river") {
+      this.drawRiverBackdrop(ctx, W, H, time, engine.stats.distance);
+    } else if (vid === "mountain") {
+      this.drawMountainBackdrop(ctx, W, H, time);
+    }
     this.drawBoardwalk(ctx, W, H, engine.stats.distance, engine);
-    this.drawPalms(ctx, W, H, engine.stats.distance);
-    this.drawBanners(ctx, W, H, engine.stats.distance);
+    if (vid === "boardwalk") {
+      this.drawPalms(ctx, W, H, engine.stats.distance, time);
+      this.drawBanners(ctx, W, H, engine.stats.distance);
+    } else if (vid === "city") {
+      this.drawCityLamps(ctx, W, H, engine.stats.distance, time);
+    } else if (vid === "river") {
+      this.drawRiverReeds(ctx, W, H, engine.stats.distance, time);
+    } else if (vid === "mountain") {
+      this.drawMountainCairns(ctx, W, H, engine.stats.distance, time);
+    } else if (vid === "crowncity") {
+      // Royal promenade: golden lamps + word banners, no palms.
+      this.drawCityLamps(ctx, W, H, engine.stats.distance, time);
+      this.drawBanners(ctx, W, H, engine.stats.distance);
+    } else if (vid === "victoryharbor") {
+      // Heroic harbor: banners + palms line the victory path.
+      this.drawBanners(ctx, W, H, engine.stats.distance);
+      this.drawPalms(ctx, W, H, engine.stats.distance, time);
+    } else if (vid === "mercybay") {
+      // Calm bay: soft reeds sway at the shoulders.
+      this.drawRiverReeds(ctx, W, H, engine.stats.distance, time);
+    }
 
     // Depth-sorted world objects (far first).
     const drawables: { z: number; fn: () => void }[] = [];
@@ -239,7 +356,7 @@ export class Renderer {
     this.drawSatan(ctx, engine, W, H, time, dt);
 
     this.drawPlayer(ctx, engine, character, W, H, time);
-    this.drawAccuserEyePeek(ctx, engine, W, H, time);
+    if (engine.spiritTimer > 0) this.drawSpiritTrail(ctx, engine, W, H, time);
     this.drawMotes(ctx, W, H, time);
     this.drawParticles(ctx, dt);
     this.drawFloaters(ctx, dt);
@@ -247,6 +364,7 @@ export class Renderer {
     this.drawMotionBlur(ctx, engine, W, H);
     this.drawScreenFlash(ctx, W, H, dt);
     this.drawSpeedLines(ctx, engine, W, H, time);
+    this.drawAmbientLight(ctx, W, H);
     this.drawVignette(ctx, engine, W, H, time);
 
     ctx.restore();
@@ -258,18 +376,21 @@ export class Renderer {
     const horizon = H * 0.36;
     // Sky shifts from dawn-gold to blood-red as Satan closes in
     const danger = Math.max(0, satanProx - 0.5) * 2; // 0..1
-    const top = danger > 0 ? `rgb(${Math.round(30 + danger * 80)},${Math.round(42 - danger * 20)},${Math.round(120 - danger * 60)})` : "#1e2a78";
-    const mid = danger > 0 ? `rgb(${Math.round(122 + danger * 80)},${Math.round(79 - danger * 40)},${Math.round(176 - danger * 80)})` : "#7a4fb0";
+    const baseTop = this.venue?.skyTop ?? "#1e2a78";
+    const baseMid = this.venue?.skyMid ?? "#7a4fb0";
+    const baseBottom = this.venue?.skyBottom ?? "#f08a4b";
+    const top = danger > 0 ? `rgb(${Math.round(30 + danger * 80)},${Math.round(42 - danger * 20)},${Math.round(120 - danger * 60)})` : baseTop;
+    const mid = danger > 0 ? `rgb(${Math.round(122 + danger * 80)},${Math.round(79 - danger * 40)},${Math.round(176 - danger * 80)})` : baseMid;
     const sky = ctx.createLinearGradient(0, 0, 0, horizon * 1.3);
     sky.addColorStop(0, top);
     sky.addColorStop(0.45, mid);
-    sky.addColorStop(0.78, "#f08a4b");
+    sky.addColorStop(0.78, baseBottom);
     sky.addColorStop(1, "#ffd166");
     ctx.fillStyle = sky;
     // Overdraw above the top edge so a living camera never reveals a gap.
     ctx.fillRect(-40, -40, W + 80, horizon * 1.35 + 40);
 
-    // Radiant horizon light — the destination is hope, calling, and Christ.
+    // Rising sun.
     const sunX = W / 2;
     const sunY = horizon * 0.96;
     const glow = ctx.createRadialGradient(sunX, sunY, 4, sunX, sunY, W * 0.32);
@@ -282,21 +403,6 @@ export class Renderer {
     ctx.beginPath();
     ctx.arc(sunX, sunY, W * 0.055, 0, Math.PI * 2);
     ctx.fill();
-
-    // Small, distant cross silhouette inside the glow. It should be reverent and
-    // readable, but never dominate the screen or turn the scene heavy-handed.
-    ctx.save();
-    ctx.globalAlpha = 0.42;
-    ctx.strokeStyle = "rgba(74,42,18,0.72)";
-    ctx.lineWidth = Math.max(1.2, W * 0.006);
-    ctx.lineCap = "round";
-    ctx.beginPath();
-    ctx.moveTo(sunX, sunY - W * 0.042);
-    ctx.lineTo(sunX, sunY + W * 0.032);
-    ctx.moveTo(sunX - W * 0.024, sunY - W * 0.012);
-    ctx.lineTo(sunX + W * 0.024, sunY - W * 0.012);
-    ctx.stroke();
-    ctx.restore();
 
     // Drifting clouds catching the dawn light.
     for (let i = 0; i < 4; i++) {
@@ -311,12 +417,12 @@ export class Renderer {
       }
     }
 
-    // Heaven-light rays sweeping slowly toward the player and across the lane.
+    // Heaven-light rays sweeping slowly.
     ctx.save();
     ctx.translate(sunX, sunY);
     ctx.globalAlpha = 0.1;
-    for (let i = 0; i < 8; i++) {
-      const a = -Math.PI / 2 + (i - 3.5) * 0.28 + Math.sin(time * 0.18 + i) * 0.045;
+    for (let i = 0; i < 5; i++) {
+      const a = -Math.PI / 2 + (i - 2) * 0.42 + Math.sin(time * 0.18 + i) * 0.05;
       ctx.save();
       ctx.rotate(a);
       const ray = ctx.createLinearGradient(0, 0, 0, -H);
@@ -326,12 +432,53 @@ export class Renderer {
       ctx.beginPath();
       ctx.moveTo(-W * 0.015, 0);
       ctx.lineTo(W * 0.015, 0);
-      ctx.lineTo(W * 0.12, -H);
-      ctx.lineTo(-W * 0.12, -H);
+      ctx.lineTo(W * 0.09, -H);
+      ctx.lineTo(-W * 0.09, -H);
       ctx.closePath();
       ctx.fill();
       ctx.restore();
     }
+    ctx.restore();
+  }
+
+  /**
+   * Phase 16.8 — painted venue backdrop, blended into the live perspective
+   * road so a static illustration reads as one continuous world with the
+   * procedurally-drawn gameplay lane.
+   *
+   * The source art is a one-point-perspective path receding to a gate/
+   * vanishing point roughly 30–38% down the frame — the same visual
+   * language as `project()`'s horizon (H*0.36). We cover-fit the image,
+   * anchor its vanishing point to the canvas horizon, clip it to a band
+   * above the gameplay lane, then feather the bottom edge into the venue's
+   * `roadColor` (tuned per-venue to match the photo's own path tone) so the
+   * hand-off into the procedural deck has no visible seam.
+   */
+  private drawVenueImageBackdrop(ctx: CanvasRenderingContext2D, W: number, H: number, img: HTMLImageElement) {
+    const horizon = H * 0.36;
+    const bandBottom = H * 0.62; // procedural deck takes over below this line
+    const anchorFrac = 0.34; // fraction down the source photo where its own vanishing point sits
+
+    const scale = Math.max(W / img.width, (bandBottom * 1.35) / img.height);
+    const dw = img.width * scale;
+    const dh = img.height * scale;
+    const dx = (W - dw) / 2;
+    const dy = horizon - anchorFrac * dh;
+
+    ctx.save();
+    ctx.beginPath();
+    ctx.rect(0, 0, W, bandBottom);
+    ctx.clip();
+    ctx.drawImage(img, dx, dy, dw, dh);
+
+    // Feather the lower third of the band into the road color so the photo
+    // hands off to the procedural deck without a hard line.
+    const feather = ctx.createLinearGradient(0, bandBottom * 0.62, 0, bandBottom);
+    const roadTone = this.venue?.roadColor ?? "#8a5a2e";
+    feather.addColorStop(0, this.rgba(roadTone, 0));
+    feather.addColorStop(1, this.rgba(roadTone, 0.92));
+    ctx.fillStyle = feather;
+    ctx.fillRect(0, 0, W, bandBottom);
     ctx.restore();
   }
 
@@ -350,21 +497,37 @@ export class Renderer {
     ctx.fillStyle = sea;
     ctx.fillRect(-40, horizon, W + 80, H - horizon + 40);
 
-    // Rolling wave foam lines.
-    ctx.strokeStyle = "rgba(255,255,255,0.28)";
-    ctx.lineWidth = 2;
-    for (let i = 0; i < 6; i++) {
-      const phase = (dist * 0.04 + i * 0.55) % 3;
-      const y = horizon + 14 + Math.pow(phase / 3, 2) * (H - horizon) * 0.95;
-      const amp = 3 + (phase / 3) * 10;
+    // Rolling wave foam lines — more layers, variable opacity.
+    for (let i = 0; i < 10; i++) {
+      const phase = (dist * 0.04 + i * 0.33) % 3;
+      const y = horizon + 10 + Math.pow(phase / 3, 2) * (H - horizon) * 0.92;
+      const amp = 2.5 + (phase / 3) * 12;
+      const alpha = 0.12 + (i % 3) * 0.08;
+      ctx.strokeStyle = `rgba(255,255,255,${alpha})`;
+      ctx.lineWidth = 1.5 + (i % 2) * 0.8;
       ctx.beginPath();
-      for (let x = 0; x <= W; x += 14) {
-        const wy = y + Math.sin(x * 0.035 + time * 1.6 + i * 2) * amp;
+      for (let x = 0; x <= W; x += 10) {
+        const wy = y + Math.sin(x * 0.03 + time * 1.6 + i * 1.7) * amp;
         if (x === 0) ctx.moveTo(x, wy);
         else ctx.lineTo(x, wy);
       }
       ctx.stroke();
     }
+
+    // Foam caps — tiny white ellipses on wave crests near the sides.
+    ctx.fillStyle = "rgba(255,255,255,0.35)";
+    for (let i = 0; i < 8; i++) {
+      const seed = i * 67.3;
+      const sideLeft = i % 2 === 0;
+      const x = sideLeft ? W * (0.03 + (seed % 20) / 100) : W * (0.77 + (seed % 20) / 100);
+      const y = horizon + H * 0.08 + ((seed * 11) % (H * 0.55));
+      const phase = (time * 1.3 + i) % (Math.PI * 2);
+      ctx.globalAlpha = 0.25 + 0.2 * Math.abs(Math.sin(phase));
+      ctx.beginPath();
+      ctx.ellipse(x, y, 5, 1.5, 0, 0, Math.PI * 2);
+      ctx.fill();
+    }
+    ctx.globalAlpha = 1;
 
     // Sun reflection shimmer down the middle.
     ctx.save();
@@ -380,22 +543,6 @@ export class Renderer {
     ctx.lineTo(W * 0.32, H);
     ctx.closePath();
     ctx.fill();
-
-    // Layered horizontal reflection strokes give the ocean a premium mobile-game
-    // shimmer without adding image assets or expensive shaders.
-    ctx.globalAlpha = 0.28;
-    ctx.lineCap = "round";
-    for (let i = 0; i < 18; i++) {
-      const yy = horizon + 18 + i * ((H - horizon) / 20);
-      const ww = W * (0.06 + i * 0.012);
-      const wobble = Math.sin(time * 1.4 + i * 1.7) * W * 0.015;
-      ctx.strokeStyle = i % 3 === 0 ? "rgba(255,239,176,0.42)" : "rgba(255,255,255,0.18)";
-      ctx.lineWidth = Math.max(1, 2.2 - i * 0.04);
-      ctx.beginPath();
-      ctx.moveTo(W / 2 - ww + wobble, yy);
-      ctx.lineTo(W / 2 + ww + wobble, yy + Math.sin(time * 2 + i) * 2);
-      ctx.stroke();
-    }
 
     // Water light caustics (subtle ripple patterns)
     ctx.globalAlpha = 0.08;
@@ -528,6 +675,419 @@ export class Renderer {
     ctx.restore();
   }
 
+  /**
+   * City of Light — a golden city glowing at night. Star field, golden tower
+   * skyline flanking the road, a distant cathedral with a glowing cross at the
+   * vanishing point, gold light-rails along the road edges, and warm rising
+   * light particles. All props live to the sides / above the horizon.
+   */
+  private drawCityBackdrop(ctx: CanvasRenderingContext2D, W: number, H: number, time: number) {
+    const horizon = H * 0.36;
+    const accent = this.venue?.accent ?? "#ffcf6b";
+    const edge = this.venue?.roadEdge ?? "#ffd54a";
+
+    ctx.save();
+
+    // Star field — rich twinkling constellation in the city night sky.
+    for (let i = 0; i < 55; i++) {
+      const seed = i * 73.13;
+      const x = (seed * 17) % W;
+      const y = (seed * 31) % (horizon * 0.88);
+      const tw = 0.2 + 0.65 * (0.5 + 0.5 * Math.sin(time * (1.5 + (i % 5) * 0.4) + i * 1.7));
+      const r = 0.5 + (i % 5 === 0 ? 1.8 : (i % 3) * 0.4); // occasional bright stars
+      ctx.fillStyle = i % 7 === 0
+        ? `rgba(255,220,180,${tw})`  // warm gold stars
+        : `rgba(255,245,225,${tw})`; // cool white stars
+      ctx.beginPath();
+      ctx.arc(x, y, r, 0, Math.PI * 2);
+      ctx.fill();
+      // Cross-shaped sparkle on the brightest stars
+      if (i % 7 === 0 && tw > 0.7) {
+        ctx.strokeStyle = `rgba(255,230,180,${tw * 0.5})`;
+        ctx.lineWidth = 0.7;
+        ctx.beginPath();
+        ctx.moveTo(x - r * 2.5, y); ctx.lineTo(x + r * 2.5, y);
+        ctx.moveTo(x, y - r * 2.5); ctx.lineTo(x, y + r * 2.5);
+        ctx.stroke();
+      }
+    }
+
+    // Golden tower skyline flanking the road (left + right of center).
+    const towers = [0.04, 0.1, 0.16, 0.22, 0.78, 0.84, 0.9, 0.96];
+    for (let i = 0; i < towers.length; i++) {
+      const center = 0.5;
+      const tx = towers[i] * W;
+      const tw = W * 0.05;
+      // Nearer center-horizon -> taller & brighter.
+      const closeness = 1 - Math.min(1, Math.abs(towers[i] - center) / 0.46);
+      const th = H * (0.05 + closeness * 0.13);
+      ctx.fillStyle = this.shade(accent, -0.55 + closeness * 0.15);
+      ctx.fillRect(tx, horizon - th, tw, th);
+      // Glowing gold windows, brighter near center.
+      const wa = 0.4 + closeness * 0.4;
+      for (let wy = 0; wy < 4; wy++) {
+        for (let wx = 0; wx < 2; wx++) {
+          ctx.fillStyle = `rgba(255,210,110,${wa * (0.6 + 0.4 * Math.sin(time * 1.5 + i + wy))})`;
+          ctx.fillRect(tx + 4 + wx * (tw / 2), horizon - th + 6 + wy * (th / 4.6), 3, 4);
+        }
+      }
+    }
+
+    // Distant cathedral silhouette with a glowing cross at the vanishing point,
+    // small + above where the road meets the horizon (never over the lane).
+    const cx = W / 2;
+    const cathW = W * 0.07;
+    const cathH = H * 0.06;
+    const cathTop = horizon - cathH;
+    ctx.fillStyle = this.shade(accent, -0.5);
+    ctx.fillRect(cx - cathW / 2, cathTop, cathW, cathH);
+    ctx.beginPath();
+    ctx.moveTo(cx - cathW / 2, cathTop);
+    ctx.lineTo(cx, cathTop - cathH * 0.5);
+    ctx.lineTo(cx + cathW / 2, cathTop);
+    ctx.closePath();
+    ctx.fill();
+    // Glowing cross-light atop the spire.
+    const crossY = cathTop - cathH * 0.62;
+    const cg = ctx.createRadialGradient(cx, crossY, 1, cx, crossY, cathW * 0.5);
+    cg.addColorStop(0, this.rgba(edge, 0.9));
+    cg.addColorStop(1, this.rgba(edge, 0));
+    ctx.fillStyle = cg;
+    ctx.fillRect(cx - cathW * 0.5, crossY - cathW * 0.5, cathW, cathW);
+    ctx.strokeStyle = this.rgba(edge, 0.95);
+    ctx.lineWidth = 1.6;
+    ctx.beginPath();
+    ctx.moveTo(cx, crossY - cathH * 0.18);
+    ctx.lineTo(cx, crossY + cathH * 0.12);
+    ctx.moveTo(cx - cathH * 0.09, crossY - cathH * 0.06);
+    ctx.lineTo(cx + cathH * 0.09, crossY - cathH * 0.06);
+    ctx.stroke();
+
+    // Gold glowing light-rails running along both road edges toward horizon.
+    ctx.lineWidth = 2;
+    for (const laneEdge of [-1.65, 3.65]) {
+      const far = this.project(laneEdge, SPAWN_Z, W, H);
+      ctx.beginPath();
+      ctx.moveTo(far.x, far.y);
+      for (let z = SPAWN_Z; z >= 0; z -= 6) {
+        const pt = this.project(laneEdge, z, W, H);
+        ctx.lineTo(pt.x, pt.y);
+      }
+      ctx.strokeStyle = this.rgba(edge, 0.4 + 0.15 * Math.sin(time * 3));
+      ctx.stroke();
+    }
+
+    // Upward-drifting warm gold light particles — doubled for City richness.
+    for (let i = 0; i < 18; i++) {
+      const seed = i * 53.7;
+      const x = (seed * 23) % W;
+      const cycle = (time * (8 + (i % 5) * 6) + seed) % (H - horizon);
+      const y = H - cycle;
+      ctx.fillStyle = this.rgba(i % 3 === 0 ? edge : accent, 0.08 + 0.14 * Math.sin(time * 2 + i));
+      ctx.beginPath();
+      ctx.arc(x, y, 1.0 + (i % 3) * 0.8, 0, Math.PI * 2);
+      ctx.fill();
+    }
+
+    // Heavenly gold banners draped between towers on both sides.
+    const bannerSides = [[0.04, 0.22], [0.78, 0.96]] as const;
+    for (const [lx, rx] of bannerSides) {
+      const bx1 = lx * W, bx2 = rx * W;
+      const by = horizon - H * 0.075;
+      const droop = H * 0.03 + Math.sin(time * 0.8) * H * 0.006;
+      ctx.save();
+      ctx.strokeStyle = this.rgba(edge, 0.45 + 0.15 * Math.sin(time * 1.2));
+      ctx.lineWidth = 1.5;
+      ctx.beginPath();
+      ctx.moveTo(bx1, by);
+      ctx.quadraticCurveTo((bx1 + bx2) / 2, by + droop, bx2, by);
+      ctx.stroke();
+      // Banner fabric
+      ctx.fillStyle = this.rgba(accent, 0.22);
+      ctx.beginPath();
+      ctx.moveTo(bx1 + W * 0.02, by - H * 0.015);
+      ctx.lineTo(bx1 + W * 0.02, by + droop * 0.5);
+      ctx.lineTo(bx1 + W * 0.05, by + droop * 0.5 + H * 0.01);
+      ctx.lineTo(bx1 + W * 0.05, by - H * 0.015);
+      ctx.closePath();
+      ctx.fill();
+      ctx.restore();
+    }
+
+    ctx.restore();
+  }
+
+  /**
+   * River of Life Run — a crystal river through a healing land. Heavenly fog
+   * band at the horizon, glowing Tree-of-Life silhouettes on the banks, a
+   * distant waterfall hint, flowing shimmer ripples, glowing lily pads, and
+   * gentle drifting mist. Props sit to the SIDES / above the horizon.
+   */
+  private drawRiverBackdrop(
+    ctx: CanvasRenderingContext2D,
+    W: number,
+    H: number,
+    time: number,
+    dist: number,
+  ) {
+    const horizon = H * 0.36;
+    const accent = this.venue?.accent ?? "#38bdf8";
+    const edge = this.venue?.roadEdge ?? "#a5f3fc";
+
+    ctx.save();
+
+    // Soft heavenly fog band near the horizon.
+    const fog = ctx.createLinearGradient(0, horizon - H * 0.05, 0, horizon + H * 0.06);
+    fog.addColorStop(0, this.rgba(edge, 0));
+    fog.addColorStop(0.5, this.rgba(edge, 0.28));
+    fog.addColorStop(1, this.rgba(edge, 0));
+    ctx.fillStyle = fog;
+    ctx.fillRect(0, horizon - H * 0.05, W, H * 0.11);
+
+    // Glowing waterfall — wider cascade above horizon, shimmering streaks.
+    for (let i = 0; i < 12; i++) {
+      const wobble = Math.sin(time * 2.5 + i * 0.8) * W * 0.006;
+      const wx = W * 0.39 + i * W * 0.022 + wobble;
+      const alpha = 0.15 + 0.2 * Math.abs(Math.sin(time * 3 + i * 1.3));
+      const thick = 1.2 + (i % 3) * 0.8;
+      ctx.strokeStyle = this.rgba(edge, alpha);
+      ctx.lineWidth = thick;
+      ctx.beginPath();
+      ctx.moveTo(wx, horizon - H * 0.12);
+      ctx.quadraticCurveTo(wx + wobble * 0.5, horizon - H * 0.04, wx, horizon + H * 0.03);
+      ctx.stroke();
+    }
+    // Mist plume at base of waterfall
+    const mistGrad = ctx.createRadialGradient(W * 0.5, horizon + H * 0.02, 0, W * 0.5, horizon + H * 0.02, W * 0.14);
+    mistGrad.addColorStop(0, this.rgba(edge, 0.28));
+    mistGrad.addColorStop(1, this.rgba(edge, 0));
+    ctx.fillStyle = mistGrad;
+    ctx.fillRect(W * 0.3, horizon - H * 0.02, W * 0.4, H * 0.08);
+
+    // Tree-of-Life silhouettes on both banks (rounded canopy + trunk), glowing.
+    for (let z = 12 - (dist % 22); z < SPAWN_Z; z += 22) {
+      for (const side of [-2.7, 4.7]) {
+        const p = this.project(side, z, W, H);
+        const s = p.scale;
+        if (s < 0.08) continue;
+        const trunkH = 70 * s;
+        ctx.strokeStyle = this.shade(accent, -0.35);
+        ctx.lineWidth = 6 * s;
+        ctx.beginPath();
+        ctx.moveTo(p.x, p.y);
+        ctx.lineTo(p.x, p.y - trunkH);
+        ctx.stroke();
+        // Glowing Tree-of-Life canopy — emerald core + blue/gold halo.
+        const cg = ctx.createRadialGradient(p.x, p.y - trunkH, 1, p.x, p.y - trunkH, 42 * s);
+        cg.addColorStop(0, "rgba(180,255,200,0.95)");
+        cg.addColorStop(0.35, "rgba(80,220,160,0.7)");
+        cg.addColorStop(0.65, this.rgba(accent, 0.45));
+        cg.addColorStop(1, this.rgba(accent, 0));
+        ctx.fillStyle = cg;
+        ctx.beginPath();
+        ctx.arc(p.x, p.y - trunkH, 38 * s, 0, Math.PI * 2);
+        ctx.fill();
+        // Outer aura ring
+        const ao = ctx.createRadialGradient(p.x, p.y - trunkH, 36 * s, p.x, p.y - trunkH, 58 * s);
+        ao.addColorStop(0, this.rgba(edge, 0.2 + 0.1 * Math.sin(time * 1.5 + z)));
+        ao.addColorStop(1, this.rgba(edge, 0));
+        ctx.fillStyle = ao;
+        ctx.beginPath();
+        ctx.arc(p.x, p.y - trunkH, 58 * s, 0, Math.PI * 2);
+        ctx.fill();
+      }
+    }
+
+    // Flowing water shimmer — horizontal ripple lines along the sides (animated).
+    ctx.lineWidth = 1.5;
+    for (let i = 0; i < 6; i++) {
+      const ry = horizon + H * 0.1 + i * (H * 0.09);
+      const off = Math.sin(time * 1.4 + i) * 8;
+      ctx.strokeStyle = this.rgba(edge, 0.18 + 0.08 * Math.sin(time * 2 + i));
+      for (const seg of [[0, W * 0.28], [W * 0.72, W]] as const) {
+        ctx.beginPath();
+        for (let x = seg[0]; x <= seg[1]; x += 12) {
+          const wy = ry + Math.sin(x * 0.04 + time * 2 + i) * 3 + off * 0.2;
+          if (x === seg[0]) ctx.moveTo(x, wy);
+          else ctx.lineTo(x, wy);
+        }
+        ctx.stroke();
+      }
+    }
+
+    // Glowing lily pads / blue crystal reflections (translucent ellipses) at sides.
+    for (let i = 0; i < 8; i++) {
+      const seed = i * 41.3;
+      const sideLeft = i % 2 === 0;
+      const x = sideLeft ? W * (0.06 + (seed % 18) / 100) : W * (0.78 + (seed % 18) / 100);
+      const y = horizon + H * 0.16 + ((seed * 7) % (H * 0.55));
+      const r = 6 + (i % 3) * 3;
+      ctx.fillStyle = this.rgba(accent, 0.22 + 0.1 * Math.sin(time * 1.5 + i));
+      ctx.beginPath();
+      ctx.ellipse(x, y, r, r * 0.4, 0, 0, Math.PI * 2);
+      ctx.fill();
+    }
+
+    // Gentle drifting mist particles (soft white, low alpha).
+    for (let i = 0; i < 8; i++) {
+      const seed = i * 67.1;
+      const x = ((seed * 19 + time * (6 + (i % 3) * 4)) % (W + 80)) - 40;
+      const y = horizon + H * 0.05 + ((seed * 13) % (H * 0.5)) + Math.sin(time + i) * 6;
+      ctx.fillStyle = `rgba(255,255,255,${0.06 + 0.05 * Math.sin(time * 1.2 + i)})`;
+      ctx.beginPath();
+      ctx.ellipse(x, y, 18, 7, 0, 0, Math.PI * 2);
+      ctx.fill();
+    }
+
+    ctx.restore();
+  }
+
+  /**
+   * Mountain of Faith — above the clouds toward sunrise. Radiating sunrise
+   * beams, layered peak silhouettes, a cloud band below the path on both sides,
+   * distant golden gates at the vanishing point, a couple of gliding eagles,
+   * and thin horizontal wind streaks. Props stay to the sides / above horizon.
+   */
+  private drawMountainBackdrop(ctx: CanvasRenderingContext2D, W: number, H: number, time: number) {
+    const horizon = H * 0.36;
+    const accent = this.venue?.accent ?? "#fbbf24";
+    const edge = this.venue?.roadEdge ?? "#fff0c0";
+    const sunX = W / 2;
+    const sunY = horizon * 0.96;
+
+    ctx.save();
+
+    // Sunrise beams radiating from the horizon glow point (slowly shifting).
+    ctx.save();
+    ctx.translate(sunX, sunY);
+    ctx.globalAlpha = 0.12;
+    for (let i = 0; i < 6; i++) {
+      const a = -Math.PI / 2 + (i - 2.5) * 0.5 + Math.sin(time * 0.2 + i) * 0.06;
+      ctx.save();
+      ctx.rotate(a);
+      const ray = ctx.createLinearGradient(0, 0, 0, -H);
+      ray.addColorStop(0, this.rgba(accent, 0.9));
+      ray.addColorStop(1, this.rgba(accent, 0));
+      ctx.fillStyle = ray;
+      ctx.beginPath();
+      ctx.moveTo(-W * 0.012, 0);
+      ctx.lineTo(W * 0.012, 0);
+      ctx.lineTo(W * 0.08, -H);
+      ctx.lineTo(-W * 0.08, -H);
+      ctx.closePath();
+      ctx.fill();
+      ctx.restore();
+    }
+    ctx.restore();
+
+    // Mountain peak silhouettes — 3 depth layers, lighter as farther.
+    const layers = [
+      { base: horizon + H * 0.02, h: H * 0.16, col: this.shade(accent, -0.62), pk: [0.12, 0.3, 0.7, 0.9] },
+      { base: horizon + H * 0.05, h: H * 0.12, col: this.shade(accent, -0.45), pk: [0.05, 0.22, 0.8, 0.95] },
+      { base: horizon + H * 0.09, h: H * 0.08, col: this.shade(accent, -0.28), pk: [0.16, 0.84] },
+    ];
+    for (const ly of layers) {
+      ctx.fillStyle = ly.col;
+      for (const px of ly.pk) {
+        // Keep peaks to the sides of the center vanishing point.
+        const x = px * W;
+        ctx.beginPath();
+        ctx.moveTo(x - W * 0.13, ly.base);
+        ctx.lineTo(x, ly.base - ly.h);
+        ctx.lineTo(x + W * 0.13, ly.base);
+        ctx.closePath();
+        ctx.fill();
+      }
+    }
+
+    // Golden gates in the distance at the vanishing point (small, above horizon).
+    const gx = W / 2;
+    const gW = W * 0.045;
+    const gH = H * 0.05;
+    const gTop = horizon - gH;
+    const gg = ctx.createRadialGradient(gx, gTop, 1, gx, gTop, gW * 1.4);
+    gg.addColorStop(0, this.rgba(edge, 0.7));
+    gg.addColorStop(1, this.rgba(edge, 0));
+    ctx.fillStyle = gg;
+    ctx.fillRect(gx - gW * 1.4, gTop - gW, gW * 2.8, gH + gW * 1.4);
+    ctx.fillStyle = this.rgba(edge, 0.9);
+    ctx.fillRect(gx - gW, gTop, gW * 0.22, gH);
+    ctx.fillRect(gx + gW * 0.78, gTop, gW * 0.22, gH);
+    ctx.lineWidth = Math.max(1.5, gW * 0.22);
+    ctx.strokeStyle = this.rgba(edge, 0.9);
+    ctx.beginPath();
+    ctx.arc(gx, gTop, gW, Math.PI, 0);
+    ctx.stroke();
+
+    // Deep cloud sea BELOW path level — dense layered white/gold cloud banks.
+    for (let i = 0; i < 20; i++) {
+      const seed = i * 59.2;
+      const sideLeft = i % 2 === 0;
+      const baseX = sideLeft
+        ? W * (0.0 + (seed % 28) / 100)
+        : W * (0.68 + (seed % 28) / 100);
+      const slowDrift = Math.sin(time * (0.3 + (i % 3) * 0.15) + i) * 6;
+      const x = baseX + slowDrift;
+      const y = horizon + H * 0.1 + ((seed * 11) % (H * 0.55)) + Math.sin(time * 0.4 + i * 0.7) * 5;
+      const cs = 16 + (i % 5) * 12;
+      const alpha = 0.10 + (i % 4) * 0.055;
+      // Gold-tinted clouds near the horizon, pure white lower down
+      const tint = y < horizon + H * 0.2
+        ? `rgba(255,240,200,${alpha})`
+        : `rgba(255,255,255,${alpha})`;
+      ctx.fillStyle = tint;
+      for (const [ox, rr] of [[-1.0, 0.55], [-0.45, 0.8], [0, 1], [0.48, 0.85], [1.05, 0.6]] as const) {
+        ctx.beginPath();
+        ctx.ellipse(x + ox * cs, y, cs * rr, cs * rr * 0.48, 0, 0, Math.PI * 2);
+        ctx.fill();
+      }
+    }
+
+    // Eagle silhouettes — 4 birds at different altitudes, sizes, speeds.
+    for (let i = 0; i < 4; i++) {
+      const span = W * 1.5;
+      const speed = 8 + i * 3.5;
+      const ex = ((time * speed + i * 550) % span + span) % span - W * 0.25;
+      const ey = horizon * (0.2 + i * 0.15) + Math.sin(time * 0.55 + i * 1.3) * 10;
+      const scale = 0.7 + (i % 3) * 0.35; // nearer birds are larger
+      const flap = (4 + (i % 3)) + Math.sin(time * (3 + i) + i) * 3;
+      const alpha = 0.35 + (i % 3) * 0.15;
+      ctx.save();
+      ctx.strokeStyle = `rgba(50,40,30,${alpha})`;
+      ctx.lineWidth = 1.5 + scale * 0.7;
+      ctx.beginPath();
+      const hw = 12 * scale;
+      ctx.moveTo(ex - hw, ey);
+      ctx.quadraticCurveTo(ex - hw * 0.45, ey - flap * scale, ex, ey);
+      ctx.quadraticCurveTo(ex + hw * 0.45, ey - flap * scale, ex + hw, ey);
+      ctx.stroke();
+      // Tail feather
+      ctx.lineWidth = 1;
+      ctx.beginPath();
+      ctx.moveTo(ex, ey);
+      ctx.lineTo(ex - 3 * scale, ey + 4 * scale);
+      ctx.moveTo(ex, ey);
+      ctx.lineTo(ex + 3 * scale, ey + 4 * scale);
+      ctx.stroke();
+      ctx.restore();
+    }
+
+    // Wind particles — thin light streaks drifting horizontally.
+    for (let i = 0; i < 6; i++) {
+      const seed = i * 83.4;
+      const x = ((seed * 21 + time * (40 + (i % 3) * 20)) % (W + 120)) - 60;
+      const y = horizon + H * 0.06 + ((seed * 9) % (H * 0.5));
+      ctx.strokeStyle = `rgba(255,250,230,${0.1 + 0.06 * Math.sin(time * 2 + i)})`;
+      ctx.lineWidth = 1.2;
+      ctx.beginPath();
+      ctx.moveTo(x, y);
+      ctx.lineTo(x + 26, y);
+      ctx.stroke();
+    }
+
+    ctx.restore();
+  }
+
   /** Floating scripture banners on poles scrolling past along the boardwalk. */
   private drawBanners(ctx: CanvasRenderingContext2D, W: number, H: number, dist: number) {
     const words = ["HOPE", "FAITH", "GRACE", "VICTORY", "LIGHT", "JOY"];
@@ -598,12 +1158,16 @@ export class Renderer {
     const right0 = this.project(3.65, SPAWN_Z, W, H);
     const leftN = this.project(-1.65, 0, W, H);
     const rightN = this.project(3.65, 0, W, H);
+    // Boardwalk keeps its exact two-tone deck; other venues tint from roadColor.
+    const themed = this.venue && this.venue.id !== "boardwalk";
+    const baseDeckLight = themed ? this.shade(this.venue!.roadColor, -0.12) : "#8a5a33";
+    const baseDeckDark = themed ? this.shade(this.venue!.roadColor, 0.12) : "#b07a45";
     const deckLight = danger > 0
       ? `rgb(${Math.round(138 - danger * 40)},${Math.round(90 - danger * 30)},${Math.round(51 - danger * 20)})`
-      : "#8a5a33";
+      : baseDeckLight;
     const deckDark = danger > 0
       ? `rgb(${Math.round(176 - danger * 50)},${Math.round(122 - danger * 40)},${Math.round(69 - danger * 25)})`
-      : "#b07a45";
+      : baseDeckDark;
     const deck = ctx.createLinearGradient(0, horizon, 0, H);
     deck.addColorStop(0, deckLight);
     deck.addColorStop(1, deckDark);
@@ -630,9 +1194,24 @@ export class Renderer {
     ctx.closePath();
     ctx.fill();
 
-    // Plank seams scrolling toward camera.
-    ctx.strokeStyle = "rgba(60,35,15,0.5)";
-    for (let z = 4 - (dist % 4); z < SPAWN_Z; z += 4) {
+    // Phase 16.7 §2 — venue-specific ground treatment. Same seam geometry
+    // everywhere (readability is sacred); each venue swaps material identity:
+    // boardwalk planks, city paving + gold light-grid, river glassy water
+    // sheen, mountain stone steps.
+    const vid = this.venue?.id ?? "boardwalk";
+    const seamStyle: Record<string, { seam: string; glow: string; spacing: number }> = {
+      boardwalk: { seam: "rgba(60,35,15,0.5)", glow: "rgba(200,150,80,0.2)", spacing: 4 },
+      city: { seam: "rgba(10,8,24,0.55)", glow: "rgba(255,213,74,0.28)", spacing: 5 },
+      river: { seam: "rgba(12,50,60,0.35)", glow: "rgba(165,243,252,0.22)", spacing: 6 },
+      mountain: { seam: "rgba(40,38,52,0.5)", glow: "rgba(255,240,192,0.18)", spacing: 5 },
+      // MEGA_GAMEPLAY_UI_FIX_001 — the three new venues
+      crowncity: { seam: "rgba(30,40,70,0.5)", glow: "rgba(255,213,74,0.26)", spacing: 5 },
+      victoryharbor: { seam: "rgba(70,42,18,0.5)", glow: "rgba(255,224,138,0.24)", spacing: 4 },
+      mercybay: { seam: "rgba(90,80,110,0.4)", glow: "rgba(240,217,168,0.2)", spacing: 6 },
+    };
+    const gs = seamStyle[vid] ?? seamStyle.boardwalk;
+    ctx.strokeStyle = gs.seam;
+    for (let z = gs.spacing - (dist % gs.spacing); z < SPAWN_Z; z += gs.spacing) {
       const l = this.project(-1.65, z, W, H);
       const r = this.project(3.65, z, W, H);
       ctx.lineWidth = Math.max(1, 3.5 * l.scale);
@@ -640,23 +1219,36 @@ export class Renderer {
       ctx.moveTo(l.x, l.y);
       ctx.lineTo(r.x, r.y);
       ctx.stroke();
-      // Every 8th plank: brighter highlight plank — sells depth.
+      // Every 8th seam: bright accent line — planks / light-grid / ripple / quartz.
       if (Math.round(z + dist) % 8 < 1) {
-        ctx.strokeStyle = "rgba(200,150,80,0.2)";
+        ctx.strokeStyle = gs.glow;
         ctx.lineWidth = Math.max(1, 2.5 * l.scale);
         ctx.beginPath();
         ctx.moveTo(l.x, l.y - 1);
         ctx.lineTo(r.x, r.y - 1);
         ctx.stroke();
-        ctx.strokeStyle = "rgba(60,35,15,0.5)";
+        ctx.strokeStyle = gs.seam;
       }
     }
 
-    // Lane divider lines — clear, premium gold lane readability without changing
-    // gameplay lanes or collision logic.
+    // River only: drifting glassy sheen patches so the path reads as living water.
+    if (vid === "river") {
+      for (let i = 0; i < 5; i++) {
+        const z = ((dist * 0.6 + i * 13) % SPAWN_Z);
+        const lane = (i % 3) - 0.0 + (i % 2 === 0 ? 0.5 : 1.5);
+        const p = this.project(lane, SPAWN_Z - z, W, H);
+        if (p.scale < 0.08) continue;
+        ctx.fillStyle = `rgba(200,245,255,${0.06 + 0.05 * Math.sin(dist * 0.15 + i * 2)})`;
+        ctx.beginPath();
+        ctx.ellipse(p.x, p.y, 60 * p.scale, 10 * p.scale, 0, 0, Math.PI * 2);
+        ctx.fill();
+      }
+    }
+
+    // Lane divider lines — glow more intensely under Holy Sprint / Kingdom Surge.
     const rushing = engine.sprintTimer > 0 || engine.surgeTimer > 0;
-    const edgeAlpha = rushing ? 0.98 : 0.82;
-    const midAlpha = rushing ? 0.68 : 0.38;
+    const edgeAlpha = rushing ? 0.95 : 0.75;
+    const midAlpha = rushing ? 0.55 : 0.28;
     for (const laneEdge of [-0.5, 0.5, 1.5, 2.5]) {
       ctx.beginPath();
       const far = this.project(laneEdge, SPAWN_Z, W, H);
@@ -665,34 +1257,57 @@ export class Renderer {
         const pt = this.project(laneEdge, z, W, H);
         ctx.lineTo(pt.x, pt.y);
       }
-      const isOuter = laneEdge === -0.5 || laneEdge === 2.5;
-      ctx.shadowBlur = isOuter ? 12 : 6;
-      ctx.shadowColor = "rgba(255,214,102,0.75)";
-      ctx.strokeStyle = isOuter
-        ? `rgba(255,214,102,${edgeAlpha})`
-        : `rgba(255,240,200,${midAlpha})`;
-      ctx.lineWidth = isOuter ? 3.4 : 2.2;
+      ctx.strokeStyle =
+        laneEdge === -0.5 || laneEdge === 2.5
+          ? (themed ? this.rgba(this.venue!.roadEdge, edgeAlpha) : `rgba(255,214,102,${edgeAlpha})`)
+          : `rgba(255,240,200,${midAlpha})`;
+      ctx.lineWidth = laneEdge === -0.5 || laneEdge === 2.5 ? 3 : 2;
       ctx.stroke();
-      ctx.shadowBlur = 0;
     }
-
-    // Thin central light path points the eye toward the horizon/cross and makes
-    // the boardwalk feel like it is leading the runner into hope.
-    const pathGlow = ctx.createLinearGradient(0, horizon, 0, H);
-    pathGlow.addColorStop(0, "rgba(255,246,205,0.28)");
-    pathGlow.addColorStop(0.45, "rgba(255,214,102,0.16)");
-    pathGlow.addColorStop(1, "rgba(255,214,102,0.02)");
-    ctx.fillStyle = pathGlow;
-    ctx.beginPath();
-    ctx.moveTo(W * 0.485, horizon);
-    ctx.lineTo(W * 0.515, horizon);
-    ctx.lineTo(W * 0.57, H + 30);
-    ctx.lineTo(W * 0.43, H + 30);
-    ctx.closePath();
-    ctx.fill();
   }
 
-  private drawPalms(ctx: CanvasRenderingContext2D, W: number, H: number, dist: number) {
+  /**
+   * Phase 15.5 §5 — subtle golden foot trail + sparkles while Spirit of the
+   * Lord protection (from shoes) is active. Drawn low at the player's feet so
+   * it never covers the player or the forward path.
+   */
+  private drawSpiritTrail(
+    ctx: CanvasRenderingContext2D,
+    engine: GameEngine,
+    W: number,
+    H: number,
+    time: number,
+  ) {
+    const foot = this.project(engine.laneX, 0, W, H);
+    const fade = Math.min(1, engine.spiritTimer / 0.6); // gentle fade-out at the end
+    ctx.save();
+    // Soft golden glow pooled at the feet.
+    const glow = ctx.createRadialGradient(foot.x, foot.y + 6, 2, foot.x, foot.y + 6, 46);
+    glow.addColorStop(0, `rgba(255,224,120,${0.3 * fade})`);
+    glow.addColorStop(1, "rgba(255,224,120,0)");
+    ctx.fillStyle = glow;
+    ctx.beginPath();
+    ctx.ellipse(foot.x, foot.y + 6, 46, 16, 0, 0, Math.PI * 2);
+    ctx.fill();
+
+    // A few rising sparkle motes around the feet — small, never over the body.
+    for (let i = 0; i < 7; i++) {
+      const phase = (time * 1.6 + i * 0.9) % 1;
+      const side = i % 2 === 0 ? -1 : 1;
+      const spread = 14 + (i % 3) * 12;
+      const sx = foot.x + side * spread + Math.sin(time * 3 + i) * 4;
+      const sy = foot.y + 8 - phase * 34;
+      const a = (1 - phase) * 0.7 * fade;
+      const r = 1 + (i % 3) * 0.8;
+      ctx.fillStyle = `rgba(255,${235 - (i % 3) * 20},150,${a})`;
+      ctx.beginPath();
+      ctx.arc(sx, sy, r, 0, Math.PI * 2);
+      ctx.fill();
+    }
+    ctx.restore();
+  }
+
+  private drawPalms(ctx: CanvasRenderingContext2D, W: number, H: number, dist: number, time = 0) {
     const horizon = H * 0.36;
     for (let z = 10 - (dist % 20); z < SPAWN_Z; z += 20) {
       for (const side of [-2.6, 4.6]) {
@@ -701,13 +1316,13 @@ export class Renderer {
         if (s < 0.07) continue;
         const trunkH = 95 * s;
 
-        // Draw palm tree (with detail and shadow)
         ctx.save();
         ctx.shadowBlur = 8 * s;
         ctx.shadowColor = "rgba(0,0,0,0.3)";
 
-        ctx.strokeStyle = "#6b4226";
-        ctx.lineWidth = 7 * s;
+        // Trunk — two-tone bark shading
+        ctx.strokeStyle = "#5a3518";
+        ctx.lineWidth = 9 * s;
         ctx.beginPath();
         ctx.moveTo(p.x, p.y);
         ctx.quadraticCurveTo(
@@ -717,24 +1332,30 @@ export class Renderer {
           p.y - trunkH,
         );
         ctx.stroke();
+        ctx.strokeStyle = "#7a5030";
+        ctx.lineWidth = 5 * s;
+        ctx.stroke();
 
-        // Fronds with wind animation
+        // Fronds with real-time wind (time-based, not dist-based)
         const topX = p.x + (side < 0 ? 22 : -22) * s;
         const topY = p.y - trunkH;
-        ctx.strokeStyle = "#2e8b57";
-        ctx.lineWidth = 4 * s;
-        for (let f = 0; f < 6; f++) {
-          const a = (f / 5) * Math.PI - Math.PI * 0.05;
-          const windSway = Math.sin(dist * 0.02 + f) * 0.15;
+        // Two frond layers — dark base + bright top
+        for (let pass = 0; pass < 2; pass++) {
+          ctx.strokeStyle = pass === 0 ? "#1a6b38" : "#34a85a";
+          ctx.lineWidth = (pass === 0 ? 4.5 : 2.5) * s;
+        for (let f = 0; f < 7; f++) {
+          const a = (f / 6) * Math.PI - Math.PI * 0.05;
+          const windSway = Math.sin(time * 1.8 + f * 0.9 + (side < 0 ? 0 : 1.1)) * 0.18;
           ctx.beginPath();
           ctx.moveTo(topX, topY);
           ctx.quadraticCurveTo(
             topX + Math.cos(a + windSway) * 34 * s,
             topY - Math.sin(a + windSway) * 16 * s,
-            topX + Math.cos(a + windSway) * 52 * s,
-            topY - Math.sin(a + windSway) * 8 * s + 14 * s,
+            topX + Math.cos(a + windSway) * 56 * s,
+            topY - Math.sin(a + windSway) * 8 * s + 16 * s,
           );
           ctx.stroke();
+        }
         }
 
         // Water reflection of palm
@@ -761,6 +1382,131 @@ export class Renderer {
         ctx.restore();
       }
     }
+  }
+
+  /**
+   * Phase 16.7 §2 — venue roadside props with real perspective scroll.
+   * City/river/mountain previously had NO depth-projected side props (only
+   * fixed-horizon backdrops), so the foreground read identically across
+   * venues. Each prop set mirrors the drawPalms pattern: project() at the
+   * road shoulders, scroll with dist, never enter the playable lanes.
+   */
+  private drawCityLamps(ctx: CanvasRenderingContext2D, W: number, H: number, dist: number, time: number) {
+    for (let z = 12 - (dist % 24); z < SPAWN_Z; z += 24) {
+      for (const side of [-2.5, 4.5]) {
+        const p = this.project(side, z, W, H);
+        const s = p.scale;
+        if (s < 0.07) continue;
+        const postH = 86 * s;
+        // Wrought post.
+        ctx.strokeStyle = "#1c1830";
+        ctx.lineWidth = 5 * s;
+        ctx.beginPath();
+        ctx.moveTo(p.x, p.y);
+        ctx.lineTo(p.x, p.y - postH);
+        ctx.stroke();
+        // Golden lantern with a warm flicker.
+        const flick = 0.85 + 0.15 * Math.sin(time * 6 + z);
+        ctx.shadowBlur = 16 * s;
+        ctx.shadowColor = "#ffd54a";
+        ctx.fillStyle = `rgba(255,213,74,${0.95 * flick})`;
+        ctx.beginPath();
+        ctx.arc(p.x, p.y - postH, 7 * s, 0, Math.PI * 2);
+        ctx.fill();
+        ctx.shadowBlur = 0;
+        // Light pool on the pavement.
+        const pool = ctx.createRadialGradient(p.x, p.y, 1, p.x, p.y, 34 * s);
+        pool.addColorStop(0, `rgba(255,213,74,${0.16 * flick})`);
+        pool.addColorStop(1, "rgba(255,213,74,0)");
+        ctx.fillStyle = pool;
+        ctx.beginPath();
+        ctx.ellipse(p.x, p.y, 34 * s, 10 * s, 0, 0, Math.PI * 2);
+        ctx.fill();
+      }
+    }
+  }
+
+  private drawRiverReeds(ctx: CanvasRenderingContext2D, W: number, H: number, dist: number, time: number) {
+    for (let z = 8 - (dist % 16); z < SPAWN_Z; z += 16) {
+      for (const side of [-2.4, 4.4]) {
+        const p = this.project(side, z, W, H);
+        const s = p.scale;
+        if (s < 0.07) continue;
+        // Cluster of swaying reeds.
+        for (let r = 0; r < 4; r++) {
+          const sway = Math.sin(time * 1.6 + z + r * 1.3) * 6 * s;
+          const rx = p.x + (r - 1.5) * 7 * s;
+          const rh = (40 + (r % 3) * 14) * s;
+          ctx.strokeStyle = r % 2 === 0 ? "#1e7a5a" : "#2ea87a";
+          ctx.lineWidth = 2.5 * s;
+          ctx.beginPath();
+          ctx.moveTo(rx, p.y);
+          ctx.quadraticCurveTo(rx + sway * 0.4, p.y - rh * 0.6, rx + sway, p.y - rh);
+          ctx.stroke();
+        }
+        // Occasional glowing lily at the reed base.
+        if (Math.round(z + dist) % 32 < 16) {
+          ctx.shadowBlur = 10 * s;
+          ctx.shadowColor = "#a5f3fc";
+          ctx.fillStyle = "rgba(220,250,255,0.9)";
+          ctx.beginPath();
+          ctx.arc(p.x + 6 * s, p.y - 2 * s, 4 * s, 0, Math.PI * 2);
+          ctx.fill();
+          ctx.shadowBlur = 0;
+        }
+      }
+    }
+  }
+
+  private drawMountainCairns(ctx: CanvasRenderingContext2D, W: number, H: number, dist: number, time: number) {
+    for (let z = 14 - (dist % 28); z < SPAWN_Z; z += 28) {
+      for (const side of [-2.5, 4.5]) {
+        const p = this.project(side, z, W, H);
+        const s = p.scale;
+        if (s < 0.07) continue;
+        // Stacked prayer-stone cairn.
+        const stones: Array<[number, number]> = [
+          [16, 9],
+          [12, 7],
+          [8, 5.5],
+        ];
+        let sy = p.y;
+        for (const [sw, sh] of stones) {
+          ctx.fillStyle = "#6a6578";
+          ctx.strokeStyle = "#3c3848";
+          ctx.lineWidth = 1.5 * s;
+          ctx.beginPath();
+          ctx.ellipse(p.x, sy - sh * s, sw * s, sh * s, 0, 0, Math.PI * 2);
+          ctx.fill();
+          ctx.stroke();
+          sy -= sh * 2 * s;
+        }
+        // Small golden torch flame crowning the cairn.
+        const fl = 0.8 + 0.2 * Math.sin(time * 8 + z);
+        ctx.shadowBlur = 12 * s;
+        ctx.shadowColor = "#fbbf24";
+        ctx.fillStyle = `rgba(251,191,36,${0.9 * fl})`;
+        ctx.beginPath();
+        ctx.ellipse(p.x, sy - 5 * s, 3.5 * s, 6 * s * fl, 0, 0, Math.PI * 2);
+        ctx.fill();
+        ctx.shadowBlur = 0;
+      }
+    }
+  }
+
+  /**
+   * Phase 16.7 §2 — per-venue ambient light grade. Washes the whole scene in
+   * the venue's `ambient` tint (a previously-unused VenueDef field) at very
+   * low alpha, unifying each world's mood without reducing obstacle contrast.
+   */
+  private drawAmbientLight(ctx: CanvasRenderingContext2D, W: number, H: number) {
+    const amb = this.venue?.ambient;
+    if (!amb) return;
+    ctx.save();
+    ctx.globalCompositeOperation = "soft-light";
+    ctx.fillStyle = this.rgba(amb, 0.35);
+    ctx.fillRect(0, 0, W, H);
+    ctx.restore();
   }
 
   // ---- World objects -----------------------------------------------------
@@ -1122,18 +1868,7 @@ export class Renderer {
     const slide = engine.sliding > 0;
     const airborne = engine.y > 0.2;
     const runPhase = engine.stats.distance * 1.9;
-
-    // Visual-only life pass: keep gameplay physics/hitboxes untouched, but anchor
-    // the rendered body by its feet so full-body PNGs face forward into the lane
-    // instead of floating/tilting from an arbitrary torso origin.
-    const runStep = Math.sin(runPhase);
-    const runBob = airborne || slide ? 0 : Math.abs(runStep) * 3.5;
-    const visualFootY = baseY + 13 - runBob;
-    const laneDelta = Math.max(-1, Math.min(1, engine.lane - engine.laneX));
-    const laneLean = laneDelta * 0.16;
-    const runLean = airborne || slide ? 0 : runStep * 0.025;
-    const jumpLean = airborne ? -0.035 : 0;
-    const slideLean = slide ? -0.09 : 0;
+    const bounce = airborne || slide ? 0 : Math.abs(Math.sin(runPhase)) * 3;
 
     ctx.save();
 
@@ -1250,36 +1985,75 @@ export class Renderer {
 
     // ---- Draw character body with unique personality ----
     // HERO SCALE: the runner is a proper hero, occupying real screen space.
-    // The transform now pivots around the local foot point (y≈13), which keeps
-    // the feet planted on the lane/board while all motion remains render-only.
+    // Feet stay planted as the body grows (anchor at local foot y ≈ 13).
     const HERO = 2.7;
+    ctx.translate(p.x, baseY - bounce);
+    ctx.translate(0, 13 * (1 - HERO));
+    ctx.rotate(slide ? 0 : -0.06);
+    ctx.lineCap = "round";
 
+    // Squash and stretch animation
     let scaleX = 1;
     let scaleY = 1;
     if (airborne) {
-      const jumpPhase = Math.max(0, Math.min(1, engine.y / 2.4));
-      scaleY = 1.04 + jumpPhase * 0.035;
-      scaleX = 0.97 - jumpPhase * 0.015;
+      // Anticipation: compress before jump, stretch in air
+      const jumpPhase = Math.min(1, bounce / 60); // normalized 0..1
+      if (jumpPhase < 0.3) {
+        // Compression phase (first 30% of jump)
+        scaleY = 1 - (0.3 - jumpPhase) * 0.15; // compress to 0.85
+        scaleX = 1 + (0.3 - jumpPhase) * 0.1;  // stretch horizontally
+      } else {
+        // Air phase
+        scaleY = 1.05;
+        scaleX = 0.95;
+      }
     } else if (slide) {
-      scaleY = 0.72;
-      scaleX = 1.18;
+      // Slide: compress vertically, stretch horizontally
+      scaleY = 0.7;
+      scaleX = 1.25;
     } else {
-      const breath = Math.sin(runPhase * 2) * 0.025;
-      scaleY = 1 + breath;
-      scaleX = 1 - breath * 0.65;
+      // Running: subtle squash/stretch with running cycle
+      const stretchFactor = Math.abs(Math.sin(runPhase) * 0.08);
+      scaleY = 1 - stretchFactor * 0.5;
+      scaleX = 1 + stretchFactor * 0.3;
+      // Gentle living "breath" — a soft ±0.02 swell so the hero feels alive
+      // even at rest. Purely additive and centered; never affects the hitbox.
+      const breath = Math.sin(time * 1.6) * 0.02;
+      scaleY += breath;
+      scaleX -= breath * 0.5;
     }
 
-    ctx.translate(p.x, visualFootY);
-    ctx.rotate(laneLean + runLean + jumpLean + slideLean);
     ctx.scale(scaleX * HERO, scaleY * HERO);
-    ctx.translate(0, -13);
-    ctx.lineCap = "round";
 
-    // Gameplay must read as a chase camera: the hero runs AWAY from the player
-    // toward the golden horizon. The current character PNGs are front-facing
-    // portrait art, so gameplay uses a clean color-matched back-facing runner
-    // silhouette instead of mirroring/distorting those assets.
-    this.drawBackFacingRunner(ctx, ch, runPhase, airborne, slide);
+    // Call character-specific renderer
+    switch (ch.id) {
+      case "zion":
+        this.drawZion(ctx, ch, time, runPhase, airborne, slide);
+        break;
+      case "grace":
+        this.drawGrace(ctx, ch, time, runPhase, airborne, slide);
+        break;
+      case "judah":
+        this.drawJudah(ctx, ch, time, runPhase, airborne, slide);
+        break;
+      case "kai":
+        this.drawKai(ctx, ch, time, runPhase, airborne, slide);
+        break;
+      case "mercy":
+        this.drawMercy(ctx, ch, time, runPhase, airborne, slide);
+        break;
+      case "caleb":
+        this.drawCaleb(ctx, ch, time, runPhase, airborne, slide);
+        break;
+      case "selah":
+        this.drawSelah(ctx, ch, time, runPhase, airborne, slide);
+        break;
+      case "malachi":
+        this.drawMalachi(ctx, ch, time, runPhase, airborne, slide);
+        break;
+      default:
+        this.drawZion(ctx, ch, time, runPhase, airborne, slide);
+    }
 
     ctx.restore();
     ctx.save();
@@ -1353,155 +2127,6 @@ export class Renderer {
       ctx.ellipse(p.x, baseY - 112, 16, 5, 0, 0, Math.PI * 2);
       ctx.stroke();
     }
-
-    ctx.restore();
-  }
-
-  /** Back-facing runner used during gameplay so the chase camera always feels right. */
-  private drawBackFacingRunner(
-    ctx: CanvasRenderingContext2D,
-    ch: CharacterDef,
-    runPhase: number,
-    airborne: boolean,
-    slide: boolean,
-  ) {
-    const primary = ch.colors.primary;
-    const secondary = ch.colors.secondary;
-    const skin = ch.colors.skin;
-    // Keep the older procedural front-view renderers referenced as emergency
-    // fallbacks for development, while the actual Phase 1 gameplay path stays
-    // strictly back-facing.
-    if (ch.id === "__legacy_front_debug__") {
-      this.drawZion(ctx, ch, 0, runPhase, airborne, slide);
-      this.drawGrace(ctx, ch, 0, runPhase, airborne, slide);
-      this.drawJudah(ctx, ch, 0, runPhase, airborne, slide);
-      this.drawKai(ctx, ch, 0, runPhase, airborne, slide);
-    }
-    const hair = ch.id === "grace" || ch.id === "esther" ? "#3a2418" : ch.id === "kai" ? "#1f2937" : "#2b2118";
-    const stride = Math.sin(runPhase);
-    const counter = Math.sin(runPhase + Math.PI);
-    const lift = airborne ? -4 : Math.abs(Math.cos(runPhase)) * 2.5;
-
-    ctx.save();
-    ctx.lineCap = "round";
-    ctx.lineJoin = "round";
-
-    if (slide) {
-      // Low, readable slide from behind — compact silhouette, not a face-forward dive.
-      ctx.rotate(-0.18);
-      ctx.fillStyle = primary;
-      ctx.beginPath();
-      ctx.roundRect(-18, -18, 36, 18, 8);
-      ctx.fill();
-      ctx.fillStyle = hair;
-      ctx.beginPath();
-      ctx.arc(14, -22, 8, 0, Math.PI * 2);
-      ctx.fill();
-      ctx.fillStyle = secondary;
-      ctx.fillRect(-14, -8, 28, 3);
-      ctx.restore();
-      return;
-    }
-
-    // Legs: bigger nearer feet, natural alternating stride away from camera.
-    for (const dir of [-1, 1]) {
-      const phase = dir === 1 ? stride : counter;
-      const hipX = dir * 7;
-      const kneeX = hipX + phase * 6;
-      const kneeY = -15 + Math.max(0, -phase) * 3;
-      const footX = hipX + phase * 12;
-      const footY = 8 - Math.max(0, phase) * 5 + lift;
-      ctx.strokeStyle = this.darken(primary);
-      ctx.lineWidth = 7.2;
-      ctx.beginPath();
-      ctx.moveTo(hipX, -28);
-      ctx.lineTo(kneeX, kneeY);
-      ctx.lineTo(footX, footY);
-      ctx.stroke();
-      ctx.fillStyle = "#f8fafc";
-      ctx.beginPath();
-      ctx.ellipse(footX, footY + 2, 7, 3.3, phase * 0.18, 0, Math.PI * 2);
-      ctx.fill();
-      ctx.fillStyle = secondary;
-      ctx.fillRect(footX - 5, footY + 3, 10, 1.7);
-    }
-
-    // Torso/back: broad shoulder shape and center spine highlight communicate rear view.
-    const torsoGrad = ctx.createLinearGradient(0, -72, 0, -24);
-    torsoGrad.addColorStop(0, this.lighten(primary));
-    torsoGrad.addColorStop(1, this.darken(primary));
-    ctx.fillStyle = torsoGrad;
-    ctx.beginPath();
-    ctx.moveTo(-16, -66);
-    ctx.quadraticCurveTo(0, -76, 16, -66);
-    ctx.quadraticCurveTo(19, -48, 12, -28);
-    ctx.quadraticCurveTo(0, -22, -12, -28);
-    ctx.quadraticCurveTo(-19, -48, -16, -66);
-    ctx.closePath();
-    ctx.fill();
-    ctx.strokeStyle = this.rgba(secondary, 0.95);
-    ctx.lineWidth = 2.1;
-    ctx.beginPath();
-    ctx.moveTo(0, -66);
-    ctx.quadraticCurveTo(2, -52, 0, -30);
-    ctx.stroke();
-
-    // Arms pump back beside the body, never reaching toward the camera.
-    for (const dir of [-1, 1]) {
-      const phase = dir === 1 ? counter : stride;
-      const shX = dir * 15;
-      const elbowX = shX + dir * 8 + phase * 4;
-      const elbowY = -50 + phase * 7;
-      const handX = elbowX + dir * 2;
-      const handY = -34 - phase * 5;
-      ctx.strokeStyle = primary;
-      ctx.lineWidth = 6.5;
-      ctx.beginPath();
-      ctx.moveTo(shX, -61);
-      ctx.lineTo(elbowX, elbowY);
-      ctx.lineTo(handX, handY);
-      ctx.stroke();
-      ctx.fillStyle = skin;
-      ctx.beginPath();
-      ctx.arc(handX, handY, 3.6, 0, Math.PI * 2);
-      ctx.fill();
-    }
-
-    // Neck/head from behind with hair cap; no facial features, no awkward rotation.
-    ctx.fillStyle = skin;
-    ctx.beginPath();
-    ctx.roundRect(-5, -78, 10, 10, 4);
-    ctx.fill();
-    ctx.fillStyle = skin;
-    ctx.beginPath();
-    ctx.arc(0, -91, 12, 0, Math.PI * 2);
-    ctx.fill();
-    ctx.fillStyle = hair;
-    ctx.beginPath();
-    ctx.arc(0, -95, 12.5, Math.PI, Math.PI * 2);
-    ctx.quadraticCurveTo(11, -87, 7, -80);
-    ctx.quadraticCurveTo(0, -84, -7, -80);
-    ctx.quadraticCurveTo(-11, -87, -12.5, -95);
-    ctx.fill();
-
-    // Character-specific back detail for collectible identity.
-    ctx.fillStyle = this.rgba(secondary, 0.95);
-    ctx.font = "900 9px Nunito, sans-serif";
-    ctx.textAlign = "center";
-    ctx.textBaseline = "middle";
-    const mark = ch.id === "zion" ? "✦" : ch.id === "grace" ? "✿" : ch.id === "judah" ? "♛" : ch.id === "kai" ? "≈" : "✧";
-    ctx.fillText(mark, 0, -48);
-
-    // Subtle rim light from the horizon on shoulders/head.
-    ctx.strokeStyle = "rgba(255,236,170,0.72)";
-    ctx.lineWidth = 1.4;
-    ctx.beginPath();
-    ctx.arc(0, -91, 13.5, Math.PI * 1.05, Math.PI * 1.95);
-    ctx.stroke();
-    ctx.beginPath();
-    ctx.moveTo(-14, -66);
-    ctx.quadraticCurveTo(0, -74, 14, -66);
-    ctx.stroke();
 
     ctx.restore();
   }
@@ -1614,10 +2239,25 @@ export class Renderer {
     const deckColor = this.board ? this.board.color : ch.colors.primary;
     const deckEdge = this.board ? this.board.edge : ch.colors.secondary;
     const deckText = this.board ? this.board.text : this.boardName(ch);
-    const boardColor = engine.surgeTimer > 0 ? "#34d399" : deckColor;
-    const edge = engine.surgeTimer > 0 ? "#a7f3d0" : deckEdge;
+    // Breakthrough outranks surge: the deck blazes victory gold.
+    const breakthrough = engine.breakthroughTimer > 0;
+    const boardColor = breakthrough ? "#fbbf24" : engine.surgeTimer > 0 ? "#34d399" : deckColor;
+    const edge = breakthrough ? "#fff3c4" : engine.surgeTimer > 0 ? "#a7f3d0" : deckEdge;
     const hover = Math.sin(time * 4) * 2; // gentle hover bob
     const cy = y + hover;
+
+    // Rarity-based edge glow intensity: brighter boards = stronger aura.
+    const rarity = this.board ? this.board.rarity : "common";
+    const glowByRarity: Record<string, number> = {
+      common: 12,
+      rare: 16,
+      epic: 20,
+      legendary: 26,
+      kingdom: 32,
+    };
+    const edgeGlow = breakthrough ? 36 : engine.surgeTimer > 0 ? 32 : (glowByRarity[rarity] ?? 12);
+    const isRadiant =
+      rarity === "kingdom" || rarity === "legendary" || engine.surgeTimer > 0 || breakthrough;
 
     ctx.save();
 
@@ -1671,11 +2311,28 @@ export class Renderer {
     ctx.fillRect(x - boardW / 2, cy - boardH / 2, boardW, boardH);
     ctx.restore();
 
-    // Bright glowing edge.
-    ctx.shadowBlur = 12;
+    // Radiant rarity shimmer: a second sweeping highlight for kingdom/legendary
+    // boards, giving them a premium animated glint.
+    if (isRadiant) {
+      const glint = (Math.sin(time * 3.4 + 1.7) * 0.5 + 0.5);
+      const gx = x + boardW * 0.4 - glint * boardW * 0.8;
+      const gg = ctx.createRadialGradient(gx, cy - 4, 0, gx, cy - 4, boardW * 0.28);
+      gg.addColorStop(0, this.rgba(edge, 0.5));
+      gg.addColorStop(1, this.rgba(edge, 0));
+      ctx.fillStyle = gg;
+      ctx.save();
+      ctx.beginPath();
+      ctx.ellipse(x, cy, boardW / 2, boardH / 2, 0, 0, Math.PI * 2);
+      ctx.clip();
+      ctx.fillRect(x - boardW / 2, cy - boardH / 2, boardW, boardH);
+      ctx.restore();
+    }
+
+    // Bright glowing edge — intensity scales with the board's rarity.
+    ctx.shadowBlur = edgeGlow;
     ctx.shadowColor = edge;
     ctx.strokeStyle = edge;
-    ctx.lineWidth = 2.5;
+    ctx.lineWidth = isRadiant ? 3 : 2.5;
     ctx.beginPath();
     ctx.ellipse(x, cy, boardW / 2, boardH / 2, 0, 0, Math.PI * 2);
     ctx.stroke();
@@ -1700,9 +2357,50 @@ export class Renderer {
     return `rgba(${(n >> 16) & 255},${(n >> 8) & 255},${n & 255},${a})`;
   }
 
+  /** Lighten (amt>0) or darken (amt<0) a #rrggbb hex by a fraction. */
+  private shade(hex: string, amt: number): string {
+    const n = parseInt(hex.slice(1), 16);
+    const adj = (c: number) =>
+      Math.max(0, Math.min(255, Math.round(c + (amt > 0 ? (255 - c) * amt : c * amt))));
+    return `rgb(${adj((n >> 16) & 255)},${adj((n >> 8) & 255)},${adj(n & 255)})`;
+  }
+
   // ---- Character-specific renderers ----
 
-  drawZion(
+  /**
+   * Phase 16.9 — restores identity to the jump/slide poses. Every character's
+   * airborne/slide body was previously just a flat primary-color rectangle +
+   * skin-colored head circle: with no secondary/accent color and no face,
+   * every hero looked like an identical colored blob off-foot. This paints a
+   * secondary-color accent band across the torso, an accent-colored shoe tip
+   * at the leading edge, and a simple eye dot — restoring at-a-glance
+   * identity without redrawing full running-state detail (outfit folds,
+   * hair) that isn't legible at tuck/dive silhouette scale anyway.
+   */
+  private paintOffFootAccent(
+    ctx: CanvasRenderingContext2D,
+    ch: CharacterDef,
+    headX: number,
+    headY: number,
+    rectX: number,
+    rectY: number,
+    rectW: number,
+    rectH: number,
+  ) {
+    ctx.fillStyle = ch.colors.secondary;
+    ctx.fillRect(rectX, rectY + rectH * 0.55, rectW, rectH * 0.16);
+    const footX = rectX + (headX >= 0 ? rectW * 0.85 : rectW * 0.15);
+    ctx.fillStyle = ch.colors.accent || ch.colors.secondary;
+    ctx.beginPath();
+    ctx.ellipse(footX, rectY + rectH, 5, 3, 0, 0, Math.PI * 2);
+    ctx.fill();
+    ctx.fillStyle = "#111";
+    ctx.beginPath();
+    ctx.arc(headX + (headX >= 0 ? -2 : 2), headY - 1, 1.4, 0, Math.PI * 2);
+    ctx.fill();
+  }
+
+  private drawZion(
     ctx: CanvasRenderingContext2D,
     ch: CharacterDef,
     _time: number,
@@ -1724,6 +2422,7 @@ export class Renderer {
       ctx.beginPath();
       ctx.arc(12, -12, 9, 0, Math.PI * 2);
       ctx.fill();
+      this.paintOffFootAccent(ctx, ch, 12, -12, -14, -8, 28, 16);
     } else if (airborne) {
       // Jump tuck
       ctx.fillStyle = blue;
@@ -1731,6 +2430,7 @@ export class Renderer {
       ctx.fillStyle = skin;
       ctx.arc(0, -22, 8.5, 0, Math.PI * 2);
       ctx.fill();
+      this.paintOffFootAccent(ctx, ch, 0, -22, -10, -20, 20, 28);
     } else {
       // Running pose
       const swing = Math.sin(runPhase) * 14;
@@ -1770,12 +2470,37 @@ export class Renderer {
       ctx.closePath();
       ctx.fill();
 
+      // Soft body shading on right third for rounded 3D look
+      ctx.fillStyle = "rgba(0,0,0,0.12)";
+      ctx.beginPath();
+      ctx.moveTo(6, -11);
+      ctx.quadraticCurveTo(18, 8, 12, 18);
+      ctx.quadraticCurveTo(8, 20, 6, 16);
+      ctx.closePath();
+      ctx.fill();
+
+      // Clothing fold lines
+      ctx.strokeStyle = "rgba(0,0,0,0.18)";
+      ctx.lineWidth = 1;
+      ctx.beginPath();
+      ctx.moveTo(-9, -8);
+      ctx.quadraticCurveTo(-6, 4, -8, 16);
+      ctx.stroke();
+
       // Gold chest stripe
       ctx.strokeStyle = gold;
       ctx.lineWidth = 2.5;
       ctx.beginPath();
       ctx.arc(0, 4, 7, 0, Math.PI * 2);
       ctx.stroke();
+
+      // Shoe sole highlight
+      ctx.strokeStyle = "rgba(255,255,255,0.6)";
+      ctx.lineWidth = 1;
+      ctx.beginPath();
+      ctx.moveTo(-14 + swing, 8); ctx.lineTo(-3 + swing, 8); ctx.stroke();
+      ctx.beginPath();
+      ctx.moveTo(3 + swing, 8); ctx.lineTo(14 + swing, 8); ctx.stroke();
 
       // Arms: pumping
       ctx.strokeStyle = blue;
@@ -1808,14 +2533,32 @@ export class Renderer {
       ctx.closePath();
       ctx.fill();
 
-      // Eyes: confident
-      ctx.fillStyle = "#1c1c28";
+      // Hair highlight arc for dimension
+      ctx.strokeStyle = "rgba(255,255,255,0.18)";
+      ctx.lineWidth = 1.5;
       ctx.beginPath();
-      ctx.ellipse(-3, -26, 1.8, 2.2, 0, 0, Math.PI * 2);
-      ctx.fill();
-      ctx.beginPath();
-      ctx.ellipse(3, -26, 1.8, 2.2, 0, 0, Math.PI * 2);
-      ctx.fill();
+      ctx.arc(0, -25, 8, Math.PI * 1.15, Math.PI * 1.75);
+      ctx.stroke();
+
+      // Eyes: premium (Zion blue)
+      // Left eye
+      ctx.fillStyle = "white";
+      ctx.beginPath(); ctx.ellipse(-3, -26, 3.2, 3.8, 0, 0, Math.PI * 2); ctx.fill();
+      ctx.fillStyle = "#2563eb";
+      ctx.beginPath(); ctx.ellipse(-3, -26, 2.1, 2.6, 0, 0, Math.PI * 2); ctx.fill();
+      ctx.fillStyle = "#111";
+      ctx.beginPath(); ctx.arc(-3, -25.7, 1.2, 0, Math.PI * 2); ctx.fill();
+      ctx.fillStyle = "white";
+      ctx.beginPath(); ctx.arc(-2.1, -26.9, 0.7, 0, Math.PI * 2); ctx.fill();
+      // Right eye
+      ctx.fillStyle = "white";
+      ctx.beginPath(); ctx.ellipse(3, -26, 3.2, 3.8, 0, 0, Math.PI * 2); ctx.fill();
+      ctx.fillStyle = "#2563eb";
+      ctx.beginPath(); ctx.ellipse(3, -26, 2.1, 2.6, 0, 0, Math.PI * 2); ctx.fill();
+      ctx.fillStyle = "#111";
+      ctx.beginPath(); ctx.arc(3, -25.7, 1.2, 0, Math.PI * 2); ctx.fill();
+      ctx.fillStyle = "white";
+      ctx.beginPath(); ctx.arc(3.9, -26.9, 0.7, 0, Math.PI * 2); ctx.fill();
 
       // Smile: confident smirk
       ctx.strokeStyle = "#1c1c28";
@@ -1826,7 +2569,7 @@ export class Renderer {
     }
   }
 
-  drawGrace(
+  private drawGrace(
     ctx: CanvasRenderingContext2D,
     ch: CharacterDef,
     _time: number,
@@ -1848,6 +2591,7 @@ export class Renderer {
       ctx.beginPath();
       ctx.arc(12, -12, 8.5, 0, Math.PI * 2);
       ctx.fill();
+      this.paintOffFootAccent(ctx, ch, 12, -12, -14, -8, 28, 16);
     } else if (airborne) {
       // Graceful jump
       ctx.fillStyle = white;
@@ -1855,6 +2599,7 @@ export class Renderer {
       ctx.fillStyle = skin;
       ctx.arc(0, -26, 8, 0, Math.PI * 2);
       ctx.fill();
+      this.paintOffFootAccent(ctx, ch, 0, -26, -10, -24, 20, 32);
     } else {
       // Running: smooth, flowing
       const swing = Math.sin(runPhase) * 15;
@@ -1894,9 +2639,34 @@ export class Renderer {
       ctx.closePath();
       ctx.fill();
 
+      // Soft body shading on right third
+      ctx.fillStyle = "rgba(0,0,0,0.10)";
+      ctx.beginPath();
+      ctx.moveTo(6, -13);
+      ctx.quadraticCurveTo(17, 6, 10, 18);
+      ctx.quadraticCurveTo(7, 19, 6, 14);
+      ctx.closePath();
+      ctx.fill();
+
+      // Clothing fold line
+      ctx.strokeStyle = "rgba(124,58,237,0.18)";
+      ctx.lineWidth = 1;
+      ctx.beginPath();
+      ctx.moveTo(-8, -10);
+      ctx.quadraticCurveTo(-5, 3, -7, 16);
+      ctx.stroke();
+
       // Purple accent stripe
       ctx.fillStyle = purple;
       ctx.fillRect(-2, -8, 4, 18);
+
+      // Shoe sole highlight
+      ctx.strokeStyle = "rgba(255,255,255,0.6)";
+      ctx.lineWidth = 1;
+      ctx.beginPath();
+      ctx.moveTo(-12 + swing, 9.5); ctx.lineTo(-2 + swing, 9.5); ctx.stroke();
+      ctx.beginPath();
+      ctx.moveTo(2 + swing, 9.5); ctx.lineTo(12 + swing, 9.5); ctx.stroke();
 
       // Arms: graceful pump
       ctx.strokeStyle = white;
@@ -1932,14 +2702,38 @@ export class Renderer {
       ctx.closePath();
       ctx.fill();
 
-      // Eyes: friendly and kind
-      ctx.fillStyle = "#6B4423";
+      // Hair highlight on ponytail
+      ctx.strokeStyle = "rgba(255,255,255,0.20)";
+      ctx.lineWidth = 1.2;
       ctx.beginPath();
-      ctx.ellipse(-3, -27, 2, 2.4, 0, 0, Math.PI * 2);
-      ctx.fill();
-      ctx.beginPath();
-      ctx.ellipse(3, -27, 2, 2.4, 0, 0, Math.PI * 2);
-      ctx.fill();
+      ctx.moveTo(-6 + ponytailWave, -20);
+      ctx.quadraticCurveTo(-4 + ponytailWave, -6, -2 + ponytailWave, 8);
+      ctx.stroke();
+
+      // Cheek blush (friendly warmth)
+      ctx.fillStyle = "rgba(255,150,150,0.25)";
+      ctx.beginPath(); ctx.arc(-6, -23, 2, 0, Math.PI * 2); ctx.fill();
+      ctx.beginPath(); ctx.arc(6, -23, 2, 0, Math.PI * 2); ctx.fill();
+
+      // Eyes: premium (Grace violet)
+      // Left eye
+      ctx.fillStyle = "white";
+      ctx.beginPath(); ctx.ellipse(-3, -27, 3.2, 3.8, 0, 0, Math.PI * 2); ctx.fill();
+      ctx.fillStyle = "#7c3aed";
+      ctx.beginPath(); ctx.ellipse(-3, -27, 2.1, 2.6, 0, 0, Math.PI * 2); ctx.fill();
+      ctx.fillStyle = "#111";
+      ctx.beginPath(); ctx.arc(-3, -26.7, 1.2, 0, Math.PI * 2); ctx.fill();
+      ctx.fillStyle = "white";
+      ctx.beginPath(); ctx.arc(-2.1, -27.9, 0.7, 0, Math.PI * 2); ctx.fill();
+      // Right eye
+      ctx.fillStyle = "white";
+      ctx.beginPath(); ctx.ellipse(3, -27, 3.2, 3.8, 0, 0, Math.PI * 2); ctx.fill();
+      ctx.fillStyle = "#7c3aed";
+      ctx.beginPath(); ctx.ellipse(3, -27, 2.1, 2.6, 0, 0, Math.PI * 2); ctx.fill();
+      ctx.fillStyle = "#111";
+      ctx.beginPath(); ctx.arc(3, -26.7, 1.2, 0, Math.PI * 2); ctx.fill();
+      ctx.fillStyle = "white";
+      ctx.beginPath(); ctx.arc(3.9, -27.9, 0.7, 0, Math.PI * 2); ctx.fill();
 
       // Kind smile
       ctx.strokeStyle = "#6B4423";
@@ -1950,7 +2744,7 @@ export class Renderer {
     }
   }
 
-  drawJudah(
+  private drawJudah(
     ctx: CanvasRenderingContext2D,
     ch: CharacterDef,
     _time: number,
@@ -1971,12 +2765,14 @@ export class Renderer {
       ctx.beginPath();
       ctx.arc(13, -13, 9, 0, Math.PI * 2);
       ctx.fill();
+      this.paintOffFootAccent(ctx, ch, 13, -13, -15, -9, 30, 18);
     } else if (airborne) {
       ctx.fillStyle = black;
       ctx.fillRect(-11, -22, 22, 30);
       ctx.fillStyle = skin;
       ctx.arc(0, -24, 9, 0, Math.PI * 2);
       ctx.fill();
+      this.paintOffFootAccent(ctx, ch, 0, -24, -11, -22, 22, 30);
     } else {
       const swing = Math.sin(runPhase) * 13;
       const lift = Math.max(0, -Math.cos(runPhase)) * 8;
@@ -2008,6 +2804,11 @@ export class Renderer {
       ctx.beginPath();
       ctx.ellipse(9 + swing, 13, 8, 4.5, 0.15, 0, Math.PI * 2);
       ctx.stroke();
+      // Boot top highlight
+      ctx.strokeStyle = "rgba(255,255,255,0.12)";
+      ctx.lineWidth = 1;
+      ctx.beginPath(); ctx.arc(-9 + swing, 11, 4, Math.PI, 0); ctx.stroke();
+      ctx.beginPath(); ctx.arc(9 + swing, 11, 4, Math.PI, 0); ctx.stroke();
 
       // Torso: black with gold accents
       ctx.fillStyle = black;
@@ -2019,6 +2820,23 @@ export class Renderer {
       ctx.quadraticCurveTo(-19, 8, -17, -6);
       ctx.closePath();
       ctx.fill();
+
+      // Soft body shading on right third
+      ctx.fillStyle = "rgba(0,0,0,0.18)";
+      ctx.beginPath();
+      ctx.moveTo(7, -9);
+      ctx.quadraticCurveTo(19, 8, 12, 20);
+      ctx.quadraticCurveTo(9, 21, 7, 16);
+      ctx.closePath();
+      ctx.fill();
+
+      // Clothing fold line
+      ctx.strokeStyle = "rgba(0,0,0,0.3)";
+      ctx.lineWidth = 1;
+      ctx.beginPath();
+      ctx.moveTo(-10, -6);
+      ctx.quadraticCurveTo(-7, 6, -9, 18);
+      ctx.stroke();
 
       // Gold lion logo on chest
       ctx.fillStyle = gold;
@@ -2057,6 +2875,13 @@ export class Renderer {
       ctx.closePath();
       ctx.fill();
 
+      // Hair highlight arc for dimension
+      ctx.strokeStyle = "rgba(255,255,255,0.15)";
+      ctx.lineWidth = 1.5;
+      ctx.beginPath();
+      ctx.arc(0, -25, 8, Math.PI * 1.15, Math.PI * 1.75);
+      ctx.stroke();
+
       // Gold crown accent — the Lion of Judah reigns.
       ctx.fillStyle = gold;
       ctx.beginPath();
@@ -2070,14 +2895,25 @@ export class Renderer {
       ctx.closePath();
       ctx.fill();
 
-      // Eyes: bright and confident.
-      ctx.fillStyle = "#1c1c28";
-      ctx.beginPath();
-      ctx.ellipse(-3, -26, 1.9, 2.3, 0, 0, Math.PI * 2);
-      ctx.fill();
-      ctx.beginPath();
-      ctx.ellipse(3, -26, 1.9, 2.3, 0, 0, Math.PI * 2);
-      ctx.fill();
+      // Eyes: premium (Judah amber)
+      // Left eye
+      ctx.fillStyle = "white";
+      ctx.beginPath(); ctx.ellipse(-3, -26, 3.2, 3.8, 0, 0, Math.PI * 2); ctx.fill();
+      ctx.fillStyle = "#b45309";
+      ctx.beginPath(); ctx.ellipse(-3, -26, 2.1, 2.6, 0, 0, Math.PI * 2); ctx.fill();
+      ctx.fillStyle = "#111";
+      ctx.beginPath(); ctx.arc(-3, -25.7, 1.2, 0, Math.PI * 2); ctx.fill();
+      ctx.fillStyle = "white";
+      ctx.beginPath(); ctx.arc(-2.1, -26.9, 0.7, 0, Math.PI * 2); ctx.fill();
+      // Right eye
+      ctx.fillStyle = "white";
+      ctx.beginPath(); ctx.ellipse(3, -26, 3.2, 3.8, 0, 0, Math.PI * 2); ctx.fill();
+      ctx.fillStyle = "#b45309";
+      ctx.beginPath(); ctx.ellipse(3, -26, 2.1, 2.6, 0, 0, Math.PI * 2); ctx.fill();
+      ctx.fillStyle = "#111";
+      ctx.beginPath(); ctx.arc(3, -25.7, 1.2, 0, Math.PI * 2); ctx.fill();
+      ctx.fillStyle = "white";
+      ctx.beginPath(); ctx.arc(3.9, -26.9, 0.7, 0, Math.PI * 2); ctx.fill();
 
       // Confident smile.
       ctx.strokeStyle = "#1c1c28";
@@ -2088,7 +2924,7 @@ export class Renderer {
     }
   }
 
-  drawKai(
+  private drawKai(
     ctx: CanvasRenderingContext2D,
     ch: CharacterDef,
     time: number,
@@ -2109,6 +2945,7 @@ export class Renderer {
       ctx.beginPath();
       ctx.arc(11, -13, 8.5, 0, Math.PI * 2);
       ctx.fill();
+      this.paintOffFootAccent(ctx, ch, 11, -13, -13, -9, 26, 18);
     } else if (airborne) {
       // Aerial trick
       ctx.rotate(Math.sin(time * 8) * 0.15);
@@ -2117,6 +2954,7 @@ export class Renderer {
       ctx.fillStyle = skin;
       ctx.arc(0, -25, 8, 0, Math.PI * 2);
       ctx.fill();
+      this.paintOffFootAccent(ctx, ch, 0, -25, -10, -23, 20, 31);
     } else {
       const swing = Math.sin(runPhase) * 16;
       const lift = Math.max(0, -Math.cos(runPhase)) * 10;
@@ -2154,6 +2992,30 @@ export class Renderer {
       ctx.quadraticCurveTo(-18, 7, -16, -8);
       ctx.closePath();
       ctx.fill();
+
+      // Soft body shading on right third
+      ctx.fillStyle = "rgba(0,0,0,0.12)";
+      ctx.beginPath();
+      ctx.moveTo(6, -11);
+      ctx.quadraticCurveTo(18, 7, 11, 19);
+      ctx.quadraticCurveTo(8, 20, 6, 15);
+      ctx.closePath();
+      ctx.fill();
+
+      // Clothing fold line
+      ctx.strokeStyle = "rgba(0,0,0,0.15)";
+      ctx.lineWidth = 1;
+      ctx.beginPath();
+      ctx.moveTo(-9, -8);
+      ctx.quadraticCurveTo(-6, 4, -8, 17);
+      ctx.stroke();
+
+      // Shoe sole highlight
+      ctx.strokeStyle = "rgba(255,255,255,0.6)";
+      ctx.beginPath();
+      ctx.moveTo(-13 + swing, 11); ctx.lineTo(-3 + swing, 11); ctx.stroke();
+      ctx.beginPath();
+      ctx.moveTo(3 + swing, 11); ctx.lineTo(13 + swing, 11); ctx.stroke();
 
       // Teal wave on chest
       ctx.strokeStyle = teal;
@@ -2196,20 +3058,800 @@ export class Renderer {
         ctx.fill();
       }
 
-      // Eyes: happy and carefree
-      ctx.fillStyle = "#6B4423";
+      // Hair highlight (small light ellipse on top)
+      ctx.fillStyle = "rgba(255,255,255,0.18)";
       ctx.beginPath();
-      ctx.ellipse(-3, -25, 1.9, 2.2, 0, 0, Math.PI * 2);
+      ctx.ellipse(-2, -30, 3, 1.5, -0.3, 0, Math.PI * 2);
       ctx.fill();
-      ctx.beginPath();
-      ctx.ellipse(3, -25, 1.9, 2.2, 0, 0, Math.PI * 2);
-      ctx.fill();
+
+      // Cheek blush (friendly warmth)
+      ctx.fillStyle = "rgba(255,150,150,0.25)";
+      ctx.beginPath(); ctx.arc(-6, -22, 2, 0, Math.PI * 2); ctx.fill();
+      ctx.beginPath(); ctx.arc(6, -22, 2, 0, Math.PI * 2); ctx.fill();
+
+      // Eyes: premium (Kai teal)
+      // Left eye
+      ctx.fillStyle = "white";
+      ctx.beginPath(); ctx.ellipse(-3, -25, 3.2, 3.8, 0, 0, Math.PI * 2); ctx.fill();
+      ctx.fillStyle = "#0d9488";
+      ctx.beginPath(); ctx.ellipse(-3, -25, 2.1, 2.6, 0, 0, Math.PI * 2); ctx.fill();
+      ctx.fillStyle = "#111";
+      ctx.beginPath(); ctx.arc(-3, -24.7, 1.2, 0, Math.PI * 2); ctx.fill();
+      ctx.fillStyle = "white";
+      ctx.beginPath(); ctx.arc(-2.1, -25.9, 0.7, 0, Math.PI * 2); ctx.fill();
+      // Right eye
+      ctx.fillStyle = "white";
+      ctx.beginPath(); ctx.ellipse(3, -25, 3.2, 3.8, 0, 0, Math.PI * 2); ctx.fill();
+      ctx.fillStyle = "#0d9488";
+      ctx.beginPath(); ctx.ellipse(3, -25, 2.1, 2.6, 0, 0, Math.PI * 2); ctx.fill();
+      ctx.fillStyle = "#111";
+      ctx.beginPath(); ctx.arc(3, -24.7, 1.2, 0, Math.PI * 2); ctx.fill();
+      ctx.fillStyle = "white";
+      ctx.beginPath(); ctx.arc(3.9, -25.9, 0.7, 0, Math.PI * 2); ctx.fill();
 
       // Bright smile
       ctx.strokeStyle = "#6B4423";
       ctx.lineWidth = 1.8;
       ctx.beginPath();
       ctx.arc(0, -19.5, 4, 0.2, Math.PI - 0.2);
+      ctx.stroke();
+    }
+  }
+
+  private drawMercy(
+    ctx: CanvasRenderingContext2D,
+    ch: CharacterDef,
+    _time: number,
+    runPhase: number,
+    airborne: boolean,
+    slide: boolean,
+  ) {
+    // Mercy: rose/gold healer, warm and gentle
+    const skin = ch.colors.skin;
+    const primary = ch.colors.primary; // rose #e879a0
+    const secondary = ch.colors.secondary; // gold #fbbf24
+
+    if (slide) {
+      // Gentle lean
+      ctx.rotate(-0.25);
+      ctx.fillStyle = primary;
+      ctx.fillRect(-13, -8, 26, 16);
+      ctx.fillStyle = skin;
+      ctx.beginPath();
+      ctx.arc(11, -12, 9.5, 0, Math.PI * 2);
+      ctx.fill();
+      this.paintOffFootAccent(ctx, ch, 11, -12, -13, -8, 26, 16);
+    } else if (airborne) {
+      // Reaching upward
+      ctx.fillStyle = primary;
+      ctx.fillRect(-10, -22, 20, 30);
+      // Arms reaching up
+      ctx.strokeStyle = primary;
+      ctx.lineWidth = 6;
+      ctx.beginPath();
+      ctx.moveTo(-10, -18);
+      ctx.lineTo(-14, -32);
+      ctx.stroke();
+      ctx.beginPath();
+      ctx.moveTo(10, -18);
+      ctx.lineTo(14, -32);
+      ctx.stroke();
+      ctx.fillStyle = skin;
+      ctx.beginPath();
+      ctx.arc(0, -24, 9.5, 0, Math.PI * 2);
+      ctx.fill();
+      this.paintOffFootAccent(ctx, ch, 0, -24, -10, -22, 20, 30);
+    } else {
+      const swing = Math.sin(runPhase) * 14;
+      const lift = Math.max(0, -Math.cos(runPhase)) * 8;
+
+      // Legs: rose leggings
+      ctx.strokeStyle = primary;
+      ctx.lineWidth = 8;
+      for (const dir of [1, -1]) {
+        ctx.beginPath();
+        ctx.moveTo(dir * 5, -18);
+        ctx.lineTo(dir * 5 + swing * 0.5, -6 - lift);
+        ctx.lineTo(dir * 5 + swing, 9);
+        ctx.stroke();
+      }
+
+      // Shoes: soft white with rose stripe
+      ctx.fillStyle = "#f5f5f5";
+      ctx.beginPath();
+      ctx.ellipse(-7 + swing, 10, 6.5, 3.5, -0.15, 0, Math.PI * 2);
+      ctx.fill();
+      ctx.beginPath();
+      ctx.ellipse(7 + swing, 10, 6.5, 3.5, 0.15, 0, Math.PI * 2);
+      ctx.fill();
+      ctx.fillStyle = primary;
+      ctx.fillRect(-12 + swing, 11, 6, 1.8);
+      ctx.fillRect(5 + swing, 11, 6, 1.8);
+
+      // Torso: rose top
+      ctx.fillStyle = primary;
+      ctx.beginPath();
+      ctx.moveTo(-15, -10);
+      ctx.quadraticCurveTo(0, -16, 15, -10);
+      ctx.quadraticCurveTo(17, 6, 10, 18);
+      ctx.quadraticCurveTo(0, 22, -10, 18);
+      ctx.quadraticCurveTo(-17, 6, -15, -10);
+      ctx.closePath();
+      ctx.fill();
+
+      // Soft body shading on right third
+      ctx.fillStyle = "rgba(0,0,0,0.10)";
+      ctx.beginPath();
+      ctx.moveTo(6, -12);
+      ctx.quadraticCurveTo(17, 6, 10, 18);
+      ctx.quadraticCurveTo(7, 19, 6, 14);
+      ctx.closePath();
+      ctx.fill();
+
+      // Clothing fold line
+      ctx.strokeStyle = "rgba(190,40,90,0.18)";
+      ctx.lineWidth = 1;
+      ctx.beginPath();
+      ctx.moveTo(-8, -9);
+      ctx.quadraticCurveTo(-5, 3, -7, 16);
+      ctx.stroke();
+
+      // Gold cross badge on chest
+      ctx.fillStyle = secondary;
+      ctx.fillRect(-1.5, -6, 3, 9); // vertical
+      ctx.fillRect(-5, -3.5, 10, 3); // horizontal
+
+      // Shoe sole highlight
+      ctx.strokeStyle = "rgba(255,255,255,0.6)";
+      ctx.lineWidth = 1;
+      ctx.beginPath();
+      ctx.moveTo(-12 + swing, 11.5); ctx.lineTo(-2 + swing, 11.5); ctx.stroke();
+      ctx.beginPath();
+      ctx.moveTo(2 + swing, 11.5); ctx.lineTo(12 + swing, 11.5); ctx.stroke();
+
+      // Arms: graceful, rose-colored
+      ctx.strokeStyle = primary;
+      ctx.lineWidth = 6.5;
+      for (const dir of [1, -1]) {
+        const armSwing = Math.sin(runPhase + (dir > 0 ? Math.PI : 0)) * 11;
+        ctx.beginPath();
+        ctx.moveTo(dir * 13, -8);
+        ctx.lineTo(dir * 15 + armSwing * 0.4, 10 + armSwing);
+        ctx.stroke();
+        ctx.fillStyle = skin;
+        ctx.beginPath();
+        ctx.arc(dir * 15 + armSwing * 0.4, 15 + armSwing, 4, 0, Math.PI * 2);
+        ctx.fill();
+      }
+
+      // Head: slightly rounder face
+      ctx.fillStyle = skin;
+      ctx.beginPath();
+      ctx.arc(0, -25, 9.5, 0, Math.PI * 2);
+      ctx.fill();
+
+      // Hair: two buns
+      ctx.fillStyle = "#c0392b"; // dark rose hair
+      ctx.beginPath(); ctx.arc(-5, -33, 5, 0, Math.PI * 2); ctx.fill(); // left bun
+      ctx.beginPath(); ctx.arc(5, -33, 5, 0, Math.PI * 2); ctx.fill(); // right bun
+      ctx.beginPath();
+      ctx.arc(0, -28, 9, Math.PI, 0);
+      ctx.quadraticCurveTo(8, -24, 0, -24);
+      ctx.quadraticCurveTo(-8, -24, -9, -28);
+      ctx.closePath();
+      ctx.fill();
+
+      // Hair highlight on buns
+      ctx.strokeStyle = "rgba(255,255,255,0.20)";
+      ctx.lineWidth = 1.2;
+      ctx.beginPath(); ctx.arc(-5, -33, 3.2, Math.PI * 1.1, Math.PI * 1.8); ctx.stroke();
+      ctx.beginPath(); ctx.arc(5, -33, 3.2, Math.PI * 1.1, Math.PI * 1.8); ctx.stroke();
+
+      // Cheek blush (friendly warmth)
+      ctx.fillStyle = "rgba(255,150,150,0.25)";
+      ctx.beginPath(); ctx.arc(-6, -23, 2, 0, Math.PI * 2); ctx.fill();
+      ctx.beginPath(); ctx.arc(6, -23, 2, 0, Math.PI * 2); ctx.fill();
+
+      // Eyes: premium (Mercy rose)
+      // Left eye
+      ctx.fillStyle = "white";
+      ctx.beginPath(); ctx.ellipse(-3, -26, 3.2, 3.8, 0, 0, Math.PI * 2); ctx.fill();
+      ctx.fillStyle = "#db2777";
+      ctx.beginPath(); ctx.ellipse(-3, -26, 2.1, 2.6, 0, 0, Math.PI * 2); ctx.fill();
+      ctx.fillStyle = "#111";
+      ctx.beginPath(); ctx.arc(-3, -25.7, 1.2, 0, Math.PI * 2); ctx.fill();
+      ctx.fillStyle = "white";
+      ctx.beginPath(); ctx.arc(-2.1, -26.9, 0.7, 0, Math.PI * 2); ctx.fill();
+      // Right eye
+      ctx.fillStyle = "white";
+      ctx.beginPath(); ctx.ellipse(3, -26, 3.2, 3.8, 0, 0, Math.PI * 2); ctx.fill();
+      ctx.fillStyle = "#db2777";
+      ctx.beginPath(); ctx.ellipse(3, -26, 2.1, 2.6, 0, 0, Math.PI * 2); ctx.fill();
+      ctx.fillStyle = "#111";
+      ctx.beginPath(); ctx.arc(3, -25.7, 1.2, 0, Math.PI * 2); ctx.fill();
+      ctx.fillStyle = "white";
+      ctx.beginPath(); ctx.arc(3.9, -26.9, 0.7, 0, Math.PI * 2); ctx.fill();
+
+      // Warm smile
+      ctx.strokeStyle = "#6B2437";
+      ctx.lineWidth = 1.8;
+      ctx.beginPath();
+      ctx.arc(0, -21, 4, 0, Math.PI);
+      ctx.stroke();
+    }
+  }
+
+  private drawCaleb(
+    ctx: CanvasRenderingContext2D,
+    ch: CharacterDef,
+    _time: number,
+    runPhase: number,
+    airborne: boolean,
+    slide: boolean,
+  ) {
+    // Caleb: green/gold adventurer, bold and wholehearted
+    const skin = ch.colors.skin;
+    const primary = ch.colors.primary; // green #16a34a
+    const secondary = ch.colors.secondary; // gold #ca8a04
+
+    if (slide) {
+      // Diving forward
+      ctx.rotate(-0.32);
+      ctx.fillStyle = primary;
+      ctx.fillRect(-15, -8, 30, 16);
+      ctx.fillStyle = skin;
+      ctx.beginPath();
+      ctx.arc(13, -12, 10, 0, Math.PI * 2);
+      ctx.fill();
+      this.paintOffFootAccent(ctx, ch, 13, -12, -15, -8, 30, 16);
+    } else if (airborne) {
+      // Jumping with fist raised
+      ctx.fillStyle = primary;
+      ctx.fillRect(-11, -22, 22, 30);
+      ctx.strokeStyle = primary;
+      ctx.lineWidth = 8;
+      ctx.beginPath();
+      ctx.moveTo(-11, -18);
+      ctx.lineTo(-16, -34);
+      ctx.stroke();
+      ctx.fillStyle = skin;
+      ctx.beginPath();
+      ctx.arc(-16, -38, 5, 0, Math.PI * 2);
+      ctx.fill();
+      ctx.fillStyle = skin;
+      ctx.beginPath();
+      ctx.arc(0, -24, 10, 0, Math.PI * 2);
+      ctx.fill();
+      this.paintOffFootAccent(ctx, ch, 0, -24, -11, -22, 22, 30);
+    } else {
+      const swing = Math.sin(runPhase) * 13;
+      const lift = Math.max(0, -Math.cos(runPhase)) * 8;
+
+      // Legs: dark green
+      ctx.strokeStyle = "#15803d";
+      ctx.lineWidth = 9.5;
+      for (const dir of [1, -1]) {
+        ctx.beginPath();
+        ctx.moveTo(dir * 7, -17);
+        ctx.lineTo(dir * 7 + swing * 0.6, -5 - lift);
+        ctx.lineTo(dir * 7 + swing, 10);
+        ctx.stroke();
+      }
+
+      // Boots: dark brown with gold buckle stripe
+      ctx.fillStyle = "#3d2008";
+      ctx.beginPath();
+      ctx.ellipse(-8 + swing, 11, 7.5, 4.5, -0.15, 0, Math.PI * 2);
+      ctx.fill();
+      ctx.beginPath();
+      ctx.ellipse(8 + swing, 11, 7.5, 4.5, 0.15, 0, Math.PI * 2);
+      ctx.fill();
+      ctx.strokeStyle = secondary;
+      ctx.lineWidth = 2;
+      ctx.beginPath();
+      ctx.moveTo(-14 + swing, 10); ctx.lineTo(-3 + swing, 10); ctx.stroke();
+      ctx.beginPath();
+      ctx.moveTo(3 + swing, 10); ctx.lineTo(14 + swing, 10); ctx.stroke();
+
+      // Torso: forest green vest/jacket
+      ctx.fillStyle = primary;
+      ctx.beginPath();
+      ctx.moveTo(-16, -8);
+      ctx.quadraticCurveTo(0, -14, 16, -8);
+      ctx.quadraticCurveTo(18, 8, 12, 20);
+      ctx.quadraticCurveTo(0, 23, -12, 20);
+      ctx.quadraticCurveTo(-18, 8, -16, -8);
+      ctx.closePath();
+      ctx.fill();
+
+      // Soft body shading on right third
+      ctx.fillStyle = "rgba(0,0,0,0.13)";
+      ctx.beginPath();
+      ctx.moveTo(7, -9);
+      ctx.quadraticCurveTo(18, 8, 12, 20);
+      ctx.quadraticCurveTo(9, 21, 7, 16);
+      ctx.closePath();
+      ctx.fill();
+
+      // Clothing fold line
+      ctx.strokeStyle = "rgba(0,0,0,0.20)";
+      ctx.lineWidth = 1;
+      ctx.beginPath();
+      ctx.moveTo(-9, -7);
+      ctx.quadraticCurveTo(-6, 5, -8, 17);
+      ctx.stroke();
+
+      // Gold shield badge
+      ctx.fillStyle = secondary;
+      ctx.beginPath();
+      ctx.moveTo(0, -2); ctx.lineTo(-5, -8); ctx.lineTo(-5, -14);
+      ctx.lineTo(5, -14); ctx.lineTo(5, -8); ctx.closePath();
+      ctx.fill();
+
+      // Boot sole highlight
+      ctx.strokeStyle = "rgba(255,255,255,0.18)";
+      ctx.lineWidth = 1;
+      ctx.beginPath();
+      ctx.moveTo(-14 + swing, 13.5); ctx.lineTo(-3 + swing, 13.5); ctx.stroke();
+      ctx.beginPath();
+      ctx.moveTo(3 + swing, 13.5); ctx.lineTo(14 + swing, 13.5); ctx.stroke();
+
+      // Arms: green sleeves, powerful stride
+      ctx.strokeStyle = primary;
+      ctx.lineWidth = 8;
+      for (const dir of [1, -1]) {
+        const armSwing = Math.sin(runPhase + (dir > 0 ? Math.PI : 0)) * 10;
+        ctx.beginPath();
+        ctx.moveTo(dir * 15, -5);
+        ctx.lineTo(dir * 18 + armSwing * 0.5, 10 + armSwing);
+        ctx.stroke();
+        ctx.fillStyle = skin;
+        ctx.beginPath();
+        ctx.arc(dir * 18 + armSwing * 0.5, 15 + armSwing, 4.5, 0, Math.PI * 2);
+        ctx.fill();
+      }
+
+      // Head: slightly square jaw
+      ctx.fillStyle = skin;
+      ctx.beginPath();
+      ctx.arc(0, -25, 10, 0, Math.PI * 2);
+      ctx.fill();
+
+      // Hair: short textured curls
+      ctx.fillStyle = "#3d2b1f"; // dark brown
+      for (let i = -3; i <= 3; i++) {
+        ctx.beginPath();
+        ctx.arc(i * 3, -33, 4, Math.PI, 0);
+        ctx.fill();
+      }
+      // Hair highlight arc for dimension
+      ctx.strokeStyle = "rgba(255,255,255,0.14)";
+      ctx.lineWidth = 1.3;
+      ctx.beginPath();
+      ctx.arc(0, -33, 8, Math.PI * 1.15, Math.PI * 1.75);
+      ctx.stroke();
+
+      // Eyes: premium (Caleb green)
+      // Left eye
+      ctx.fillStyle = "white";
+      ctx.beginPath(); ctx.ellipse(-3, -26, 3.2, 3.8, 0, 0, Math.PI * 2); ctx.fill();
+      ctx.fillStyle = "#15803d";
+      ctx.beginPath(); ctx.ellipse(-3, -26, 2.1, 2.6, 0, 0, Math.PI * 2); ctx.fill();
+      ctx.fillStyle = "#111";
+      ctx.beginPath(); ctx.arc(-3, -25.7, 1.2, 0, Math.PI * 2); ctx.fill();
+      ctx.fillStyle = "white";
+      ctx.beginPath(); ctx.arc(-2.1, -26.9, 0.7, 0, Math.PI * 2); ctx.fill();
+      // Right eye
+      ctx.fillStyle = "white";
+      ctx.beginPath(); ctx.ellipse(3, -26, 3.2, 3.8, 0, 0, Math.PI * 2); ctx.fill();
+      ctx.fillStyle = "#15803d";
+      ctx.beginPath(); ctx.ellipse(3, -26, 2.1, 2.6, 0, 0, Math.PI * 2); ctx.fill();
+      ctx.fillStyle = "#111";
+      ctx.beginPath(); ctx.arc(3, -25.7, 1.2, 0, Math.PI * 2); ctx.fill();
+      ctx.fillStyle = "white";
+      ctx.beginPath(); ctx.arc(3.9, -26.9, 0.7, 0, Math.PI * 2); ctx.fill();
+
+      // Determined smile
+      ctx.strokeStyle = "#1c1c28";
+      ctx.lineWidth = 1.8;
+      ctx.beginPath();
+      ctx.arc(0, -21, 4, 0.1, Math.PI - 0.1);
+      ctx.stroke();
+    }
+  }
+
+  private drawSelah(
+    ctx: CanvasRenderingContext2D,
+    ch: CharacterDef,
+    _time: number,
+    runPhase: number,
+    airborne: boolean,
+    slide: boolean,
+  ) {
+    // Selah: lavender/silver worship runner, peaceful
+    const skin = ch.colors.skin;
+    const primary = ch.colors.primary; // lavender #a78bfa
+    const secondary = ch.colors.secondary; // silver #c0c0c0
+
+    if (slide) {
+      // Graceful low dive
+      ctx.rotate(-0.22);
+      ctx.fillStyle = primary;
+      ctx.fillRect(-13, -8, 26, 16);
+      ctx.fillStyle = skin;
+      ctx.beginPath();
+      ctx.arc(11, -12, 9, 0, Math.PI * 2);
+      ctx.fill();
+      this.paintOffFootAccent(ctx, ch, 11, -12, -13, -8, 26, 16);
+    } else if (airborne) {
+      // Arms outstretched — worshipful
+      ctx.fillStyle = primary;
+      ctx.fillRect(-10, -22, 20, 30);
+      ctx.strokeStyle = primary;
+      ctx.lineWidth = 6.5;
+      ctx.beginPath();
+      ctx.moveTo(-10, -16);
+      ctx.lineTo(-22, -10);
+      ctx.stroke();
+      ctx.beginPath();
+      ctx.moveTo(10, -16);
+      ctx.lineTo(22, -10);
+      ctx.stroke();
+      ctx.fillStyle = skin;
+      ctx.beginPath();
+      ctx.arc(0, -24, 9, 0, Math.PI * 2);
+      ctx.fill();
+      this.paintOffFootAccent(ctx, ch, 0, -24, -10, -22, 20, 30);
+    } else {
+      const swing = Math.sin(runPhase) * 15;
+      const lift = Math.max(0, -Math.cos(runPhase)) * 9;
+      const hairWave = Math.sin(runPhase) * 3;
+
+      // Legs: lavender leggings
+      ctx.strokeStyle = primary;
+      ctx.lineWidth = 8;
+      for (const dir of [1, -1]) {
+        ctx.beginPath();
+        ctx.moveTo(dir * 5, -19);
+        ctx.lineTo(dir * 5 + swing * 0.5, -7 - lift);
+        ctx.lineTo(dir * 5 + swing, 10);
+        ctx.stroke();
+      }
+
+      // Shoes: silver/white with lavender stripe
+      ctx.fillStyle = "#e8e8e8";
+      ctx.beginPath();
+      ctx.ellipse(-7 + swing, 11, 6.5, 3.5, -0.15, 0, Math.PI * 2);
+      ctx.fill();
+      ctx.beginPath();
+      ctx.ellipse(7 + swing, 11, 6.5, 3.5, 0.15, 0, Math.PI * 2);
+      ctx.fill();
+      ctx.fillStyle = primary;
+      ctx.fillRect(-12 + swing, 12, 6, 1.8);
+      ctx.fillRect(5 + swing, 12, 6, 1.8);
+
+      // Torso: lavender
+      ctx.fillStyle = primary;
+      ctx.beginPath();
+      ctx.moveTo(-15, -10);
+      ctx.quadraticCurveTo(0, -16, 15, -10);
+      ctx.quadraticCurveTo(17, 6, 10, 18);
+      ctx.quadraticCurveTo(0, 22, -10, 18);
+      ctx.quadraticCurveTo(-17, 6, -15, -10);
+      ctx.closePath();
+      ctx.fill();
+
+      // Soft body shading on right third
+      ctx.fillStyle = "rgba(0,0,0,0.10)";
+      ctx.beginPath();
+      ctx.moveTo(6, -12);
+      ctx.quadraticCurveTo(17, 6, 10, 18);
+      ctx.quadraticCurveTo(7, 19, 6, 14);
+      ctx.closePath();
+      ctx.fill();
+
+      // Clothing fold line
+      ctx.strokeStyle = "rgba(109,40,217,0.18)";
+      ctx.lineWidth = 1;
+      ctx.beginPath();
+      ctx.moveTo(-8, -10);
+      ctx.quadraticCurveTo(-5, 3, -7, 16);
+      ctx.stroke();
+
+      // Silver music note
+      ctx.fillStyle = secondary;
+      ctx.beginPath(); ctx.arc(0, 4, 4, 0, Math.PI * 2); ctx.fill(); // note head
+      ctx.fillRect(3, -6, 2, 12); // stem
+      ctx.fillRect(3, -6, 6, 2); // flag
+
+      // Shoe sole highlight
+      ctx.strokeStyle = "rgba(255,255,255,0.6)";
+      ctx.lineWidth = 1;
+      ctx.beginPath();
+      ctx.moveTo(-12 + swing, 12.5); ctx.lineTo(-2 + swing, 12.5); ctx.stroke();
+      ctx.beginPath();
+      ctx.moveTo(2 + swing, 12.5); ctx.lineTo(12 + swing, 12.5); ctx.stroke();
+
+      // Arms: flowing, slightly wider swing
+      ctx.strokeStyle = primary;
+      ctx.lineWidth = 6.5;
+      for (const dir of [1, -1]) {
+        const armSwing = Math.sin(runPhase + (dir > 0 ? Math.PI : 0)) * 12;
+        ctx.beginPath();
+        ctx.moveTo(dir * 13, -8);
+        ctx.lineTo(dir * 16 + armSwing * 0.5, 10 + armSwing);
+        ctx.stroke();
+        ctx.fillStyle = skin;
+        ctx.beginPath();
+        ctx.arc(dir * 16 + armSwing * 0.5, 15 + armSwing, 4, 0, Math.PI * 2);
+        ctx.fill();
+      }
+
+      // Head: soft oval
+      ctx.fillStyle = skin;
+      ctx.beginPath();
+      ctx.arc(0, -25, 9, 0, Math.PI * 2);
+      ctx.fill();
+
+      // Hair: long flowing with wave motion
+      ctx.fillStyle = "#7c3aed"; // deep purple hair
+      // Left flow
+      ctx.beginPath();
+      ctx.moveTo(-5, -32);
+      ctx.quadraticCurveTo(-14 + hairWave, -18, -10 + hairWave, 4);
+      ctx.quadraticCurveTo(-12 + hairWave, 8, -8 + hairWave, 8);
+      ctx.quadraticCurveTo(-6 + hairWave, 4, -8, -16);
+      ctx.quadraticCurveTo(-6, -28, -4, -33);
+      ctx.closePath();
+      ctx.fill();
+      // Right flow
+      ctx.beginPath();
+      ctx.moveTo(5, -32);
+      ctx.quadraticCurveTo(14 - hairWave, -18, 10 - hairWave, 4);
+      ctx.quadraticCurveTo(12 - hairWave, 8, 8 - hairWave, 8);
+      ctx.quadraticCurveTo(6 - hairWave, 4, 8, -16);
+      ctx.quadraticCurveTo(6, -28, 4, -33);
+      ctx.closePath();
+      ctx.fill();
+      // Hair cap
+      ctx.beginPath();
+      ctx.arc(0, -29, 9, Math.PI, 0);
+      ctx.quadraticCurveTo(8, -25, 0, -25);
+      ctx.quadraticCurveTo(-8, -25, -9, -29);
+      ctx.closePath();
+      ctx.fill();
+
+      // Hair highlight arc for dimension
+      ctx.strokeStyle = "rgba(255,255,255,0.20)";
+      ctx.lineWidth = 1.3;
+      ctx.beginPath();
+      ctx.arc(0, -29, 7.5, Math.PI * 1.15, Math.PI * 1.75);
+      ctx.stroke();
+
+      // Cheek blush (friendly warmth)
+      ctx.fillStyle = "rgba(255,150,150,0.25)";
+      ctx.beginPath(); ctx.arc(-6, -23, 2, 0, Math.PI * 2); ctx.fill();
+      ctx.beginPath(); ctx.arc(6, -23, 2, 0, Math.PI * 2); ctx.fill();
+
+      // Eyes: premium (Selah purple)
+      // Left eye
+      ctx.fillStyle = "white";
+      ctx.beginPath(); ctx.ellipse(-3, -26, 3.2, 3.8, 0, 0, Math.PI * 2); ctx.fill();
+      ctx.fillStyle = "#6d28d9";
+      ctx.beginPath(); ctx.ellipse(-3, -26, 2.1, 2.6, 0, 0, Math.PI * 2); ctx.fill();
+      ctx.fillStyle = "#111";
+      ctx.beginPath(); ctx.arc(-3, -25.7, 1.2, 0, Math.PI * 2); ctx.fill();
+      ctx.fillStyle = "white";
+      ctx.beginPath(); ctx.arc(-2.1, -26.9, 0.7, 0, Math.PI * 2); ctx.fill();
+      // Right eye
+      ctx.fillStyle = "white";
+      ctx.beginPath(); ctx.ellipse(3, -26, 3.2, 3.8, 0, 0, Math.PI * 2); ctx.fill();
+      ctx.fillStyle = "#6d28d9";
+      ctx.beginPath(); ctx.ellipse(3, -26, 2.1, 2.6, 0, 0, Math.PI * 2); ctx.fill();
+      ctx.fillStyle = "#111";
+      ctx.beginPath(); ctx.arc(3, -25.7, 1.2, 0, Math.PI * 2); ctx.fill();
+      ctx.fillStyle = "white";
+      ctx.beginPath(); ctx.arc(3.9, -26.9, 0.7, 0, Math.PI * 2); ctx.fill();
+
+      // Peaceful gentle smile
+      ctx.strokeStyle = "#6B4423";
+      ctx.lineWidth = 1.8;
+      ctx.beginPath();
+      ctx.arc(0, -21, 3.5, 0, Math.PI);
+      ctx.stroke();
+    }
+  }
+
+  private drawMalachi(
+    ctx: CanvasRenderingContext2D,
+    ch: CharacterDef,
+    _time: number,
+    runPhase: number,
+    airborne: boolean,
+    slide: boolean,
+  ) {
+    // Malachi: fire red/gold messenger, intense and powerful
+    const skin = ch.colors.skin;
+    const primary = ch.colors.primary; // fire red #ef4444
+    const secondary = ch.colors.secondary; // gold #fbbf24
+
+    if (slide) {
+      // Low power slide
+      ctx.rotate(-0.35);
+      ctx.fillStyle = primary;
+      ctx.fillRect(-16, -9, 32, 18);
+      ctx.fillStyle = skin;
+      ctx.beginPath();
+      ctx.arc(14, -13, 10.5, 0, Math.PI * 2);
+      ctx.fill();
+      this.paintOffFootAccent(ctx, ch, 14, -13, -16, -9, 32, 18);
+    } else if (airborne) {
+      // Explosive jump
+      ctx.fillStyle = primary;
+      ctx.fillRect(-11, -22, 22, 30);
+      ctx.strokeStyle = primary;
+      ctx.lineWidth = 8;
+      ctx.beginPath();
+      ctx.moveTo(-11, -18);
+      ctx.lineTo(-18, -30);
+      ctx.stroke();
+      ctx.beginPath();
+      ctx.moveTo(11, -18);
+      ctx.lineTo(18, -30);
+      ctx.stroke();
+      ctx.fillStyle = skin;
+      ctx.beginPath();
+      ctx.arc(0, -24, 10.5, 0, Math.PI * 2);
+      ctx.fill();
+      this.paintOffFootAccent(ctx, ch, 0, -24, -11, -22, 22, 30);
+    } else {
+      const swing = Math.sin(runPhase) * 13;
+      const lift = Math.max(0, -Math.cos(runPhase)) * 8;
+
+      // Legs: dark navy/black
+      ctx.strokeStyle = "#1e1b4b";
+      ctx.lineWidth = 10;
+      for (const dir of [1, -1]) {
+        ctx.beginPath();
+        ctx.moveTo(dir * 7, -17);
+        ctx.lineTo(dir * 7 + swing * 0.6, -4 - lift);
+        ctx.lineTo(dir * 7 + swing, 12);
+        ctx.stroke();
+      }
+
+      // Boots: dark with gold fire-tip detail
+      ctx.fillStyle = "#1a1208";
+      ctx.beginPath();
+      ctx.ellipse(-9 + swing, 13, 8, 4.5, -0.15, 0, Math.PI * 2);
+      ctx.fill();
+      ctx.beginPath();
+      ctx.ellipse(9 + swing, 13, 8, 4.5, 0.15, 0, Math.PI * 2);
+      ctx.fill();
+      ctx.strokeStyle = secondary;
+      ctx.lineWidth = 2;
+      ctx.beginPath();
+      ctx.moveTo(-15 + swing, 11); ctx.lineTo(-4 + swing, 11); ctx.stroke();
+      ctx.beginPath();
+      ctx.moveTo(4 + swing, 11); ctx.lineTo(15 + swing, 11); ctx.stroke();
+
+      // Torso: deep red
+      ctx.fillStyle = primary;
+      ctx.beginPath();
+      ctx.moveTo(-17, -7);
+      ctx.quadraticCurveTo(0, -14, 17, -7);
+      ctx.quadraticCurveTo(19, 8, 12, 20);
+      ctx.quadraticCurveTo(0, 24, -12, 20);
+      ctx.quadraticCurveTo(-19, 8, -17, -7);
+      ctx.closePath();
+      ctx.fill();
+
+      // Soft body shading on right third
+      ctx.fillStyle = "rgba(0,0,0,0.15)";
+      ctx.beginPath();
+      ctx.moveTo(7, -8);
+      ctx.quadraticCurveTo(19, 8, 12, 20);
+      ctx.quadraticCurveTo(9, 22, 7, 16);
+      ctx.closePath();
+      ctx.fill();
+
+      // Clothing fold line
+      ctx.strokeStyle = "rgba(0,0,0,0.22)";
+      ctx.lineWidth = 1;
+      ctx.beginPath();
+      ctx.moveTo(-10, -6);
+      ctx.quadraticCurveTo(-7, 6, -9, 18);
+      ctx.stroke();
+
+      // Boot sole highlight
+      ctx.strokeStyle = "rgba(255,255,255,0.14)";
+      ctx.lineWidth = 1;
+      ctx.beginPath();
+      ctx.moveTo(-15 + swing, 15.5); ctx.lineTo(-4 + swing, 15.5); ctx.stroke();
+      ctx.beginPath();
+      ctx.moveTo(4 + swing, 15.5); ctx.lineTo(15 + swing, 15.5); ctx.stroke();
+
+      // Gold flame badge
+      ctx.fillStyle = secondary;
+      ctx.beginPath();
+      ctx.moveTo(0, -14);
+      ctx.quadraticCurveTo(-4, -8, -3, -2);
+      ctx.quadraticCurveTo(0, 2, 3, -2);
+      ctx.quadraticCurveTo(4, -8, 0, -14);
+      ctx.closePath();
+      ctx.fill();
+
+      // Arms: powerful, fire-red
+      ctx.strokeStyle = primary;
+      ctx.lineWidth = 8.5;
+      for (const dir of [1, -1]) {
+        const armSwing = Math.sin(runPhase + (dir > 0 ? Math.PI : 0)) * 10;
+        ctx.beginPath();
+        ctx.moveTo(dir * 15, -5);
+        ctx.lineTo(dir * 18 + armSwing * 0.5, 12 + armSwing);
+        ctx.stroke();
+        ctx.fillStyle = skin;
+        ctx.beginPath();
+        ctx.arc(dir * 18 + armSwing * 0.5, 17 + armSwing, 4.5, 0, Math.PI * 2);
+        ctx.fill();
+      }
+
+      // Head: strong
+      ctx.fillStyle = skin;
+      ctx.beginPath();
+      ctx.arc(0, -25, 10.5, 0, Math.PI * 2);
+      ctx.fill();
+
+      // Hair: sharp, swept-back with fire highlights
+      ctx.fillStyle = "#111"; // black base
+      ctx.beginPath();
+      ctx.moveTo(-10, -28);
+      ctx.lineTo(-8, -38);
+      ctx.lineTo(-2, -36);
+      ctx.lineTo(0, -40);
+      ctx.lineTo(2, -36);
+      ctx.lineTo(6, -38);
+      ctx.lineTo(8, -28);
+      ctx.arc(0, -28, 10, 0, Math.PI, true);
+      ctx.closePath();
+      ctx.fill();
+      // Gold fire tips in hair
+      ctx.fillStyle = secondary;
+      ctx.beginPath(); ctx.arc(-2, -38, 2, 0, Math.PI * 2); ctx.fill();
+      ctx.beginPath(); ctx.arc(2, -40, 1.5, 0, Math.PI * 2); ctx.fill();
+      // Hair highlight sheen on swept-back base
+      ctx.strokeStyle = "rgba(255,255,255,0.12)";
+      ctx.lineWidth = 1.2;
+      ctx.beginPath();
+      ctx.moveTo(-7, -31);
+      ctx.quadraticCurveTo(0, -36, 7, -31);
+      ctx.stroke();
+
+      // Eyes: premium, intense (Malachi red)
+      // Left eye
+      ctx.fillStyle = "white";
+      ctx.beginPath(); ctx.ellipse(-3, -26, 3.2, 3.8, 0, 0, Math.PI * 2); ctx.fill();
+      ctx.fillStyle = "#dc2626";
+      ctx.beginPath(); ctx.ellipse(-3, -26, 2.1, 2.6, 0, 0, Math.PI * 2); ctx.fill();
+      ctx.fillStyle = "#111";
+      ctx.beginPath(); ctx.arc(-3, -25.7, 1.2, 0, Math.PI * 2); ctx.fill();
+      ctx.fillStyle = "white";
+      ctx.beginPath(); ctx.arc(-2.1, -26.9, 0.7, 0, Math.PI * 2); ctx.fill();
+      // Right eye
+      ctx.fillStyle = "white";
+      ctx.beginPath(); ctx.ellipse(3, -26, 3.2, 3.8, 0, 0, Math.PI * 2); ctx.fill();
+      ctx.fillStyle = "#dc2626";
+      ctx.beginPath(); ctx.ellipse(3, -26, 2.1, 2.6, 0, 0, Math.PI * 2); ctx.fill();
+      ctx.fillStyle = "#111";
+      ctx.beginPath(); ctx.arc(3, -25.7, 1.2, 0, Math.PI * 2); ctx.fill();
+      ctx.fillStyle = "white";
+      ctx.beginPath(); ctx.arc(3.9, -26.9, 0.7, 0, Math.PI * 2); ctx.fill();
+
+      // Determined fierce smile
+      ctx.strokeStyle = "#3d1a0a";
+      ctx.lineWidth = 2;
+      ctx.beginPath();
+      ctx.moveTo(-4, -20);
+      ctx.quadraticCurveTo(0, -18, 4, -20);
       ctx.stroke();
     }
   }
@@ -2229,13 +3871,11 @@ export class Renderer {
     // and falls back / shrinks when the player gains ground (power-ups).
     const prox = engine.satan;
     const rise = Math.max(0.15, Math.min(1, prox)); // always at least a looming hint
-    // He stays behind the runner from the chase-camera perspective and only
-    // becomes more readable when pressure rises, so the light remains the hero.
-    // He belongs BEHIND the runner from the chase-camera perspective: low/near
-    // the camera, never standing between the child and the horizon light.
-    const S = 16 + Math.pow(rise, 1.5) * 56; // far: subtle; close: readable threat
-    const cx = W / 2 - rise * W * 0.1 + Math.sin(time * 1.05) * W * 0.035;
-    const footY = H * (1.05 - rise * 0.18); // far: mostly off-screen; close: behind hero
+    // He stays a smaller, distant figure UP the track until he genuinely
+    // closes in (quadratic ramp), so he never merges with the bright hero.
+    const S = 22 + Math.pow(rise, 1.5) * 80; // far: ~22px unit; close: ~102px
+    const cx = W / 2 + Math.sin(time * 1.05) * W * 0.05;
+    const footY = H * 0.42 + rise * rise * (H * 0.44); // far: up-track; close: at hero
 
     const runC = time * (5 + rise * 5); // strides quicken as he closes
     const legSwing = Math.sin(runC);
@@ -2249,33 +3889,53 @@ export class Renderer {
 
     ctx.save();
 
-    // Distant spiritual-opposition aura: readable pressure, not horror/gore.
+    // Hellish aura behind the figure.
     const aura = ctx.createRadialGradient(cx, midY, S * 0.2, cx, midY, S * 3.2);
-    aura.addColorStop(0, `rgba(85,35,120,${0.16 * rise})`);
-    aura.addColorStop(0.5, `rgba(30,20,70,${0.12 * rise})`);
-    aura.addColorStop(1, "rgba(20,10,55,0)");
+    aura.addColorStop(0, `rgba(190,20,30,${0.2 * rise})`);
+    aura.addColorStop(0.5, `rgba(120,10,40,${0.11 * rise})`);
+    aura.addColorStop(1, "rgba(80,0,30,0)");
     ctx.fillStyle = aura;
     ctx.fillRect(cx - S * 3.2, midY - S * 3.2, S * 6.4, S * 6.4);
 
-    // Ground shadow at his feet.
-    ctx.fillStyle = `rgba(0,0,0,${0.32 * rise})`;
+    // Ground shadow at his feet — a soft radial pool so the silhouette feels
+    // grounded without a hard edge.
+    const shadow = ctx.createRadialGradient(
+      cx, footY + S * 0.1, S * 0.2, cx, footY + S * 0.1, S * 1.4,
+    );
+    shadow.addColorStop(0, `rgba(0,0,0,${0.34 * rise})`);
+    shadow.addColorStop(1, "rgba(0,0,0,0)");
+    ctx.fillStyle = shadow;
     ctx.beginPath();
-    ctx.ellipse(cx, footY + S * 0.1, S * 1.25, S * 0.32, 0, 0, Math.PI * 2);
+    ctx.ellipse(cx, footY + S * 0.1, S * 1.4, S * 0.38, 0, 0, Math.PI * 2);
     ctx.fill();
 
-    // Smoke kicked up as he runs.
-    for (let i = 0; i < 7; i++) {
-      const ph = (time * 1.6 + i * 0.9) % 2;
-      const sa = Math.max(0, 1 - ph / 2) * 0.4 * rise;
+    // Soft trailing shadow smear behind his feet for grounded dread.
+    const trail = ctx.createRadialGradient(
+      cx, footY + S * 0.18, S * 0.15, cx, footY + S * 0.18, S * 2.0,
+    );
+    trail.addColorStop(0, `rgba(0,0,0,${0.16 * rise})`);
+    trail.addColorStop(1, "rgba(0,0,0,0)");
+    ctx.fillStyle = trail;
+    ctx.beginPath();
+    ctx.ellipse(cx, footY + S * 0.18, S * 2.0, S * 0.3, 0, 0, Math.PI * 2);
+    ctx.fill();
+
+    // Smoke kicked up as he runs — extra, softer plumes for a heavier dread.
+    // Each plume is a radial gradient so it fades at the edges (no hard rim).
+    for (let i = 0; i < 11; i++) {
+      const ph = (time * 1.6 + i * 0.62) % 2;
+      const sa = Math.max(0, 1 - ph / 2) * 0.32 * rise;
       if (sa <= 0) continue;
-      ctx.fillStyle = `rgba(30,16,42,${sa})`;
+      const px = cx + (i - 5) * S * 0.18 + Math.sin(time + i) * 6;
+      const py = footY - ph * S * 0.55;
+      const pr = S * (0.22 + ph * 0.26);
+      const puff = ctx.createRadialGradient(px, py, pr * 0.15, px, py, pr);
+      puff.addColorStop(0, `rgba(34,18,48,${sa})`);
+      puff.addColorStop(0.6, `rgba(30,16,42,${sa * 0.55})`);
+      puff.addColorStop(1, "rgba(24,12,36,0)");
+      ctx.fillStyle = puff;
       ctx.beginPath();
-      ctx.arc(
-        cx + (i - 3) * S * 0.24 + Math.sin(time + i) * 6,
-        footY - ph * S * 0.5,
-        S * (0.24 + ph * 0.22),
-        0, Math.PI * 2,
-      );
+      ctx.arc(px, py, pr, 0, Math.PI * 2);
       ctx.fill();
     }
 
@@ -2370,16 +4030,25 @@ export class Renderer {
     ctx.closePath();
     ctx.fill();
 
-    // Glowing eyes with a heartbeat pulse. The silhouette stays family-friendly:
-    // no horns, gore, grotesque anatomy, or horror-monster detail.
+    // Horns.
+    for (const d of [-1, 1]) {
+      ctx.beginPath();
+      ctx.moveTo(cx + d * S * 0.3, headY - S * 0.35);
+      ctx.quadraticCurveTo(cx + d * S * 0.78, headY - S * 0.95, cx + d * S * 0.5, headY - S * 1.18);
+      ctx.quadraticCurveTo(cx + d * S * 0.5, headY - S * 0.7, cx + d * S * 0.22, headY - S * 0.45);
+      ctx.closePath();
+      ctx.fill();
+    }
+
+    // Glowing red eyes with a heartbeat pulse.
     const eyeY = headY - S * 0.02;
     const beat = 0.6 + 0.4 * Math.sin(time * 6);
     for (const d of [-1, 1]) {
       const ex = cx + d * S * 0.2;
       const g = ctx.createRadialGradient(ex, eyeY, 1, ex, eyeY, S * 0.32);
-      g.addColorStop(0, `rgba(255,170,95,${beat})`);
-      g.addColorStop(0.4, `rgba(245,92,70,${beat * 0.55})`);
-      g.addColorStop(1, "rgba(180,60,90,0)");
+      g.addColorStop(0, `rgba(255,130,90,${beat})`);
+      g.addColorStop(0.4, `rgba(230,40,30,${beat * 0.6})`);
+      g.addColorStop(1, "rgba(200,20,20,0)");
       ctx.fillStyle = g;
       ctx.beginPath();
       ctx.arc(ex, eyeY, S * 0.32, 0, Math.PI * 2);
@@ -2390,8 +4059,8 @@ export class Renderer {
       ctx.fill();
     }
 
-    // Purple-red rim light separates the silhouette from the golden sky.
-    ctx.strokeStyle = `rgba(165,86,247,${0.38 + 0.24 * Math.sin(time * 6)})`;
+    // Red rim light to separate the silhouette from the sky.
+    ctx.strokeStyle = `rgba(220,40,60,${0.45 + 0.3 * Math.sin(time * 6)})`;
     ctx.lineWidth = 2;
     ctx.beginPath();
     ctx.arc(cx, headY, S * 0.5, Math.PI * 0.15, Math.PI * 0.85);
@@ -2441,34 +4110,6 @@ export class Renderer {
     ctx.shadowBlur = 0;
     ctx.restore();
     this.satanScrolls = this.satanScrolls.filter((s) => s.life > 0 && s.y < H + 40);
-  }
-
-  /** Tiny eye glints peeking from behind the runner when the Accuser is close. */
-  private drawAccuserEyePeek(ctx: CanvasRenderingContext2D, engine: GameEngine, W: number, H: number, time: number) {
-    const pressure = Math.max(0, (engine.satan - 0.45) / 0.55);
-    if (pressure <= 0.02) return;
-    const p = this.project(engine.laneX, 0, W, H);
-    const baseY = p.y - engine.y * H * 0.055;
-    const eyeY = baseY - 86 + Math.sin(time * 5) * 1.5;
-    const eyeX = p.x - 46 - pressure * 16;
-    const beat = 0.62 + 0.38 * Math.sin(time * 6);
-    ctx.save();
-    for (const d of [-1, 1]) {
-      const ex = eyeX + d * 7;
-      const glow = ctx.createRadialGradient(ex, eyeY, 1, ex, eyeY, 15 + pressure * 10);
-      glow.addColorStop(0, `rgba(255,210,126,${0.72 * beat * pressure})`);
-      glow.addColorStop(0.45, `rgba(245,92,70,${0.5 * beat * pressure})`);
-      glow.addColorStop(1, "rgba(180,60,90,0)");
-      ctx.fillStyle = glow;
-      ctx.beginPath();
-      ctx.arc(ex, eyeY, 15 + pressure * 10, 0, Math.PI * 2);
-      ctx.fill();
-      ctx.fillStyle = `rgba(255,235,190,${0.9 * pressure})`;
-      ctx.beginPath();
-      ctx.ellipse(ex, eyeY, 2.2 + pressure * 1.4, 1.4 + pressure, 0, 0, Math.PI * 2);
-      ctx.fill();
-    }
-    ctx.restore();
   }
 
   // ---- Effects -------------------------------------------------------------

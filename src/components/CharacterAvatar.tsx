@@ -2,6 +2,12 @@ import { useState } from "react";
 import { motion } from "framer-motion";
 import type { CharacterDef } from "../types";
 
+// Phase 16.3 §7 — ART PLACEHOLDER SAFETY
+// This SVG avatar is the franchise's current, fully-functional hero rendering.
+// When real 3D character art exports are ready, wire them in here (e.g. branch
+// on a `ch.artUrl`/`ch.modelUrl` field) and keep THIS SVG as the guaranteed
+// fallback so locked/Coming-Soon heroes and missing assets never break the UI.
+
 type Pose = "idle" | "victory";
 
 /** Per-character, per-pose arm geometry: [leftPts, rightPts, leftHand, rightHand]. */
@@ -79,22 +85,24 @@ function Mouth({ id }: { id: string }) {
   }
 }
 
-/**
- * Stylized, expressive character avatar with a holy halo, per-character hair,
- * expression and stance, plus idle/victory poses. Identifiable at thumbnail size.
- */
-export function CharacterAvatar({
-  ch,
-  pose = "idle",
-  className = "h-28 w-auto drop-shadow-lg",
-  animate = true,
-}: {
+interface AvatarProps {
   ch: CharacterDef;
   pose?: Pose;
   className?: string;
   animate?: boolean;
-}) {
-  const [imgFailed, setImgFailed] = useState(false);
+}
+
+/**
+ * Stylized, expressive SVG character avatar with a holy halo, per-character
+ * hair, expression and stance, plus idle/victory poses. This is the guaranteed
+ * fallback whenever real 3D art is missing or fails to load.
+ */
+function AvatarSVG({
+  ch,
+  pose = "idle",
+  className = "h-28 w-auto drop-shadow-lg",
+  animate = true,
+}: AvatarProps) {
   const c = ch.colors;
   const [lArm, rArm, lHand, rHand] = armPaths(ch.id, pose);
   const gid = `glow-${ch.id}`;
@@ -107,20 +115,6 @@ export function CharacterAvatar({
   const idleTrans = pose === "victory"
     ? { duration: 0.5, repeat: Infinity, ease: "easeInOut" as const }
     : { duration: 2.6, repeat: Infinity, ease: "easeInOut" as const };
-
-  if (!imgFailed) {
-    const filename = ch.id === "the_accuser" ? "accuser.png" : `${ch.id}.png`;
-    return (
-      <motion.img
-        src={`/assets/characters/${filename}`}
-        alt={ch.name}
-        className={className}
-        animate={idleAnim}
-        transition={idleTrans}
-        onError={() => setImgFailed(true)}
-      />
-    );
-  }
 
   return (
     <motion.svg viewBox="0 0 80 112" className={className} animate={idleAnim} transition={idleTrans}>
@@ -178,4 +172,39 @@ export function CharacterAvatar({
       <Mouth id={ch.id} />
     </motion.svg>
   );
+}
+
+/**
+ * Phase 16.4 — Image-first hero avatar.
+ *
+ * Uses the character's 3D art (`image`/`portrait`/`cardArt`) when present, and
+ * automatically falls back to the SVG `AvatarSVG` if no art is defined OR if the
+ * image fails to load (`onError`). This guarantees no broken-image icons and no
+ * layout shift — the image is constrained to the same sizing className and uses
+ * `object-contain`. Locked / Coming Soon dimming is applied by the parent
+ * container, so it carries through to either render path.
+ */
+export function CharacterAvatar(props: AvatarProps) {
+  const {
+    ch,
+    className = "h-28 w-auto drop-shadow-lg",
+  } = props;
+  const src = ch.image ?? ch.portrait ?? ch.cardArt;
+  const [failed, setFailed] = useState(false);
+
+  if (src && !failed) {
+    return (
+      <img
+        src={src}
+        alt={ch.name}
+        draggable={false}
+        loading="lazy"
+        decoding="async"
+        onError={() => setFailed(true)}
+        className={`${className} object-contain`}
+      />
+    );
+  }
+
+  return <AvatarSVG {...props} />;
 }

@@ -1,10 +1,91 @@
-import { useEffect } from "react";
+import { useEffect, useState } from "react";
 import { motion } from "framer-motion";
 import type { RunStats, SaveData } from "../types";
 import { Button } from "../components/Button";
 import { CharacterAvatar } from "../components/CharacterAvatar";
 import { getCharacter } from "../data/characters";
 import { sound } from "../audio/SoundEngine";
+
+const ACCUSER_PORTRAIT = "/assets/characters/accuser/accuser_portrait.png";
+
+/**
+ * Cuts a flat-white background out of an image into real alpha transparency,
+ * with a soft-edge falloff so anti-aliased outlines don't leave a white
+ * fringe. The Accuser portrait's source PNG has no alpha channel (confirmed:
+ * PNG color type 2 / RGB, not RGBA) — CSS mix-blend-mode was tried first but
+ * doesn't reach through the Game Over screen's animated (Framer Motion)
+ * wrapper's stacking context, so this processes real pixels instead.
+ */
+function useWhiteKeyedImage(src: string): { dataUrl: string | null; failed: boolean } {
+  const [dataUrl, setDataUrl] = useState<string | null>(null);
+  const [failed, setFailed] = useState(false);
+
+  useEffect(() => {
+    let cancelled = false;
+    const img = new Image();
+    img.onload = () => {
+      if (cancelled) return;
+      try {
+        const canvas = document.createElement("canvas");
+        canvas.width = img.width;
+        canvas.height = img.height;
+        const ctx = canvas.getContext("2d");
+        if (!ctx) throw new Error("no 2d context");
+        ctx.drawImage(img, 0, 0);
+        const frame = ctx.getImageData(0, 0, canvas.width, canvas.height);
+        const d = frame.data;
+        const threshold = 235;
+        const soft = 40;
+        for (let i = 0; i < d.length; i += 4) {
+          const minC = Math.min(d[i], d[i + 1], d[i + 2]);
+          if (minC >= threshold) {
+            d[i + 3] = 0;
+          } else if (minC > threshold - soft) {
+            d[i + 3] = Math.round((d[i + 3] * (threshold - minC)) / soft);
+          }
+        }
+        ctx.putImageData(frame, 0, 0);
+        if (!cancelled) setDataUrl(canvas.toDataURL("image/png"));
+      } catch {
+        if (!cancelled) setFailed(true);
+      }
+    };
+    img.onerror = () => {
+      if (!cancelled) setFailed(true);
+    };
+    img.src = src;
+    return () => {
+      cancelled = true;
+    };
+  }, [src]);
+
+  return { dataUrl, failed };
+}
+
+/**
+ * Phase — CS-ACCUSER-REVEAL-001. A brief, contained reveal shown only on the
+ * "caught" flavor of Game Over — the live procedural chase Accuser
+ * (drawSatan in render.ts) is untouched; this is a separate, static portrait
+ * moment framing the catch as already-defeated, not scary. Image-first with
+ * an automatic fallback (mirrors CharacterAvatar's onError pattern) so a
+ * missing/broken asset never crashes or blanks the screen.
+ */
+function AccuserReveal() {
+  const { dataUrl, failed } = useWhiteKeyedImage(ACCUSER_PORTRAIT);
+  return (
+    <div className="flex h-28 justify-center">
+      {failed || !dataUrl ? (
+        <div className="text-5xl">😈</div>
+      ) : (
+        <img
+          src={dataUrl}
+          alt="The Accuser"
+          className="h-28 w-auto object-contain drop-shadow-[0_0_16px_rgba(220,40,60,0.45)]"
+        />
+      )}
+    </div>
+  );
+}
 
 function Stat({ label, value, delay }: { label: string; value: string; delay: number }) {
   return (
@@ -67,12 +148,15 @@ export function GameOverScreen({
           </>
         ) : (
           <>
-            <div className="text-5xl">😈</div>
+            <AccuserReveal />
             <h2 className="mt-2 font-display text-3xl text-rose-400">
               THE ACCUSER CAUGHT UP
             </h2>
+            <p className="mt-1 text-sm font-semibold italic text-white/60">
+              "The accuser of our brethren is cast down." — Revelation 12:10
+            </p>
             <p className="mt-1 text-lg font-bold text-gold-300">
-              — rise and run again. ✝️
+              He pursued you... but he is already defeated. Rise and run again. ✝️
             </p>
           </>
         )}

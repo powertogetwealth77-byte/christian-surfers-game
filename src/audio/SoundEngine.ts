@@ -29,7 +29,18 @@ export type SfxName =
   | "wave"
   | "armor"
   | "surge"
-  | "achievement";
+  | "achievement"
+  | "spiritOfTheLord"
+  | "shoeEquip"
+  | "coinStreak"
+  | "finishLineApproach"
+  | "finishLineGate"
+  | "victoryFanfare"
+  | "accuserFall"
+  | "chainsBreak"
+  | "heavenlyCheer";
+
+export type VoiceStatus = "ready" | "needs-tap" | "loading" | "muted" | "not-supported";
 
 class SoundEngine {
   private ctx: AudioContext | null = null;
@@ -38,13 +49,22 @@ class SoundEngine {
   private musicTimer: number | null = null;
   private musicStep = 0;
   private musicTension = 0; // 0=calm, 1=urgent (updated from GameScreen)
+  private finishApproach = 0; // 0=none, 1=final 60s, 2=final 15s (Phase 16.1)
   private lastScriptureSpoken = 0; // timestamp of last spoken scripture
   private coinStep = 0; // rising pitch index for coin streaks
   private lastCoinAt = 0; // timestamp of last coin (for streak window)
   private lastHeartbeat = 0; // throttle the Accuser heartbeat
+  private cachedVoice: SpeechSynthesisVoice | null = null;
+  private voiceGender: "male" | "female" | "auto" = "auto";
+  private speechUnlocked = false;
+  private visibilityHandler: (() => void) | null = null;
+  private ambientNodes: { stop: () => void } | null = null;
+  private ambientVenue: string | null = null;
+  private ambientNoiseBuffer: AudioBuffer | null = null;
   muted = false;
   musicEnabled = true;
   voiceEnabled = false;
+  voiceVolume = 0.8;
 
   // A major pentatonic ladder — coins climbing it sound musical, never random.
   private static readonly PENTA = [
@@ -73,12 +93,152 @@ class SoundEngine {
 
   /** Must be called from a user gesture once to unlock audio on mobile. */
   unlock() {
-    this.ensure();
+    const ctx = this.ensure();
+    // On iOS/Android the AudioContext starts suspended; resume it inside a gesture.
+    if (ctx && ctx.state === "suspended") {
+      void ctx.resume();
+    }
+    // Warm up speechSynthesis voices cache — mobile browsers load voices lazily.
+    if (typeof window !== "undefined" && window.speechSynthesis) {
+      const voices = window.speechSynthesis.getVoices();
+      if (!voices.length) {
+        // voices not ready yet; listen for the event and cache when ready
+        const onVoicesChanged = () => {
+          this.cachedVoice = null; // force re-select with the now-loaded list
+          window.speechSynthesis.removeEventListener("voiceschanged", onVoicesChanged);
+        };
+        window.speechSynthesis.addEventListener("voiceschanged", onVoicesChanged);
+      } else {
+        // Pre-select best voice now so first scripture fires instantly
+        if (!this.cachedVoice) this.cachedVoice = this.selectBestVoice(this.voiceGender);
+      }
+
+      // iOS/Safari stalls speechSynthesis after a page visibility change.
+      // Cancel + re-queue or resume when the app comes back to foreground.
+      if (!this.visibilityHandler) {
+        this.visibilityHandler = () => {
+          if (document.visibilityState === "visible") {
+            // Resume AudioContext if iOS suspended it while backgrounded.
+            if (this.ctx && this.ctx.state === "suspended") {
+              void this.ctx.resume();
+            }
+            // Kick the speechSynthesis queue out of stall state.
+            // iOS Safari freezes the synth after backgrounding; cancel + re-queue
+            // is the only reliable recovery — we don't re-queue here (no pending
+            // verse reference available), but clearing the queue unstalls it for
+            // the next verse that fires naturally.
+            try { window.speechSynthesis.cancel(); } catch { /* noop */ }
+            // Invalidate voice cache — device may have changed audio route
+            this.cachedVoice = null;
+          }
+        };
+        document.addEventListener("visibilitychange", this.visibilityHandler);
+      }
+    }
+    this.speechUnlocked = true;
+  }
+
+  getSpeechUnlocked(): boolean {
+    return this.speechUnlocked;
+  }
+
+  /** Add natural pauses for kid-friendly delivery pacing (§3). */
+  private addNaturalPauses(text: string): string {
+    return text
+      .replace(/,/g, ", ")
+      .replace(/;/g, "; ")
+      .replace(/:/g, ": ")
+      .replace(/\. /g, "... ");
+  }
+
+  /**
+   * Try to speak a scripture verse; marks speechUnlocked on successful start.
+   * If the utterance doesn't start within 1.5s, a possible-silenced flag is set.
+   * Returns true if speech synthesis is available (even if possibly silenced).
+   */
+  trySpeakScripture(
+    ref: string,
+    text: string,
+    mode: "full" | "memory" | "repeat" | "encouragement" = "full",
+    onSpeechStart?: () => void,
+    onSpeechEnd?: () => void,
+  ): boolean {
+    if (!this.voiceEnabled || this.muted) return false;
+    if (typeof window === "undefined" || !window.speechSynthesis) return false;
+
+    const now = Date.now();
+    if (now - this.lastScriptureSpoken < 5000) return true;
+    this.lastScriptureSpoken = now;
+
+    window.speechSynthesis.cancel();
+
+    const paced = this.addNaturalPauses(text);
+    const intro =
+      mode === "repeat"
+        ? "Repeat after me."
+        : mode === "encouragement"
+          ? "Be encouraged."
+          : mode === "memory"
+            ? "Remember this verse."
+            : null;
+
+    const speakMain = () => {
+      const mainText = `${paced} ${ref}.`;
+      const utt = new SpeechSynthesisUtterance(mainText);
+      utt.rate = 0.82;
+      utt.pitch = 1.0;
+      utt.volume = this.voiceVolume;
+      try {
+        if (!this.cachedVoice) this.cachedVoice = this.selectBestVoice(this.voiceGender);
+        if (this.cachedVoice) utt.voice = this.cachedVoice;
+      } catch { /* ignore */ }
+      // If utterance doesn't start in 1.5s, it may be silenced (browser policy).
+      const silenceCheck = setTimeout(() => {
+        // speechUnlocked stays false — GameScreen can show the tap-to-enable banner.
+      }, 1500);
+      utt.onstart = () => {
+        clearTimeout(silenceCheck);
+        this.speechUnlocked = true;
+        onSpeechStart?.();
+      };
+      utt.onend = () => { onSpeechEnd?.(); };
+      try { window.speechSynthesis.speak(utt); } catch { /* ignore */ }
+    };
+
+    this.duckMusic(Math.max(4, Math.min(9, text.length * 0.08)));
+
+    if (intro) {
+      const introUtt = new SpeechSynthesisUtterance(intro);
+      introUtt.rate = 0.82;
+      introUtt.pitch = 1.0;
+      introUtt.volume = this.voiceVolume;
+      try {
+        if (!this.cachedVoice) this.cachedVoice = this.selectBestVoice(this.voiceGender);
+        if (this.cachedVoice) introUtt.voice = this.cachedVoice;
+      } catch { /* ignore */ }
+      introUtt.onend = speakMain;
+      introUtt.onstart = () => { this.speechUnlocked = true; };
+      try { window.speechSynthesis.speak(introUtt); } catch { /* ignore */ }
+    } else {
+      speakMain();
+    }
+
+    return true;
   }
 
   setMuted(muted: boolean) {
     this.muted = muted;
     if (this.master) this.master.gain.value = muted ? 0 : 0.5;
+    // Stop the ambient bed on mute, but remember the venue for a later restart.
+    if (muted) {
+      if (this.ambientNodes) {
+        try { this.ambientNodes.stop(); } catch { /* noop */ }
+        this.ambientNodes = null;
+      }
+    } else if (this.ambientVenue && !this.ambientNodes) {
+      // Unmuted again with a remembered venue and no live bed — gently restart it.
+      this.startVenueAmbient(this.ambientVenue);
+    }
   }
 
   setMusicEnabled(enabled: boolean) {
@@ -90,12 +250,132 @@ class SoundEngine {
     this.musicTension = Math.max(0, Math.min(1, t));
   }
 
+  /**
+   * Phase 16.1 — finish-line adrenaline. Layers holy tension onto the worship
+   * music as the race nears its end. 0 = normal, 1 = final 60s (rising pulse +
+   * warm cinematic heartbeat), 2 = final 15s (victory swell + golden shimmer).
+   * Everything routes through musicGain, so scripture voice still ducks it and
+   * the mute / music toggles stay in full control.
+   */
+  setFinishApproach(level: number) {
+    this.finishApproach = Math.max(0, Math.min(2, Math.round(level)));
+  }
+
   setVoiceEnabled(enabled: boolean) {
     this.voiceEnabled = enabled;
   }
 
-  /** Speak a scripture verse (periodically during gameplay). */
-  speakScripture(ref: string, text: string) {
+  setVoiceVolume(v: number) {
+    this.voiceVolume = Math.max(0, Math.min(1, v));
+  }
+
+  setVoiceGender(gender: "male" | "female" | "auto") {
+    this.voiceGender = gender;
+    this.cachedVoice = null; // invalidate cache so next speak re-selects
+  }
+
+  /**
+   * Score and select the best available TTS voice for the given gender preference.
+   * Higher score = more natural/preferred.
+   */
+  selectBestVoice(gender: "male" | "female" | "auto"): SpeechSynthesisVoice | null {
+    if (typeof window === "undefined" || !window.speechSynthesis) return null;
+    const voices = window.speechSynthesis.getVoices();
+    // Mobile browsers may not have loaded voices yet — fall back gracefully.
+    // The voiceschanged listener in unlock() will invalidate cachedVoice when ready.
+    if (!voices.length) return null;
+
+    const maleNames = /daniel|david|alex|thomas|james|george|oliver|fred|ralph|bruce|junior|male/i;
+    const femaleNames = /samantha|karen|victoria|ava|siri|allison|susan|zoe|moana|tessa|nicky|female|fiona/i;
+
+    const scored = voices.map((v) => {
+      let score = 0;
+      const name = v.name.toLowerCase();
+      const lang = v.lang.toLowerCase();
+
+      // Naturalness bonus
+      if (/natural|neural|enhanced|premium/.test(name)) score += 20;
+      // Penalize compact/low-quality voices
+      if (/compact/.test(name)) score -= 15;
+
+      // English locale preference
+      if (lang.startsWith("en-us")) score += 10;
+      else if (lang.startsWith("en-gb")) score += 7;
+      else if (lang.startsWith("en")) score += 4;
+      else score -= 5; // non-English
+
+      // Gender matching
+      if (gender === "male") {
+        if (maleNames.test(v.name)) score += 25;
+        if (femaleNames.test(v.name)) score -= 20;
+      } else if (gender === "female") {
+        if (femaleNames.test(v.name)) score += 25;
+        if (maleNames.test(v.name)) score -= 20;
+      }
+
+      // Well-known good voices
+      if (/google us english/i.test(v.name)) score += 12;
+      if (/google uk english/i.test(v.name)) score += 8;
+
+      return { voice: v, score };
+    });
+
+    scored.sort((a, b) => b.score - a.score);
+    return scored[0]?.voice ?? null;
+  }
+
+  /** Speak a short preview phrase so the user can hear the selected voice. */
+  previewVoice() {
+    if (typeof window === "undefined" || !window.speechSynthesis) return;
+    window.speechSynthesis.cancel();
+    const best = this.selectBestVoice(this.voiceGender);
+    const utt = new SpeechSynthesisUtterance("The joy of the LORD is your strength.");
+    utt.rate = 0.9;
+    utt.pitch = 1.02;
+    utt.volume = this.voiceVolume;
+    if (best) utt.voice = best;
+    try {
+      window.speechSynthesis.speak(utt);
+    } catch {
+      // silently fail
+    }
+  }
+
+  /** Current voice readiness, for the Settings status indicator. */
+  getVoiceStatus(): VoiceStatus {
+    if (typeof window === "undefined" || !window.speechSynthesis) return "not-supported";
+    if (this.muted || !this.voiceEnabled) return "muted";
+    const voices = window.speechSynthesis.getVoices();
+    if (!voices.length) return "loading";
+    if (!this.speechUnlocked) return "needs-tap";
+    return "ready";
+  }
+
+  /** Force speech unlock + preview — works as a real "enable" tap on mobile. */
+  testVoice() {
+    this.unlock();
+    this.previewVoice();
+  }
+
+  /** Gently duck the worship pad for ~`seconds` while a scripture is spoken. */
+  private duckMusic(seconds: number) {
+    const ctx = this.ensure();
+    if (!ctx || !this.musicGain) return;
+    const g = this.musicGain.gain;
+    const now = ctx.currentTime;
+    g.cancelScheduledValues(now);
+    g.setValueAtTime(g.value, now);
+    g.linearRampToValueAtTime(0.05, now + 0.4);
+    g.setValueAtTime(0.05, now + seconds);
+    g.linearRampToValueAtTime(0.16, now + seconds + 0.8);
+  }
+
+  /**
+   * Speak a COMPLETE scripture verse (Section 3A). The full KJV text is always
+   * spoken — never shortened or mixed. `mode` only changes the warm framing
+   * around the verse; one verse plays at a time (prior speech is cancelled).
+   */
+  speakScripture(ref: string, text: string, mode: "full" | "memory" | "repeat" | "encouragement" = "full") {
     if (!this.voiceEnabled || this.muted) return;
     if (typeof window === "undefined" || !window.speechSynthesis) return;
 
@@ -104,14 +384,38 @@ class SoundEngine {
     if (now - this.lastScriptureSpoken < 5000) return;
     this.lastScriptureSpoken = now;
 
-    // Cancel any ongoing speech
+    // Cancel any ongoing speech — never overlap or interrupt one verse with another.
     window.speechSynthesis.cancel();
 
-    const utterance = new SpeechSynthesisUtterance(`${ref}. ${text}`);
-    utterance.rate = 0.85; // Slower, more reverent pace
-    utterance.pitch = 1;
-    utterance.volume = 0.7;
+    // The full verse is always spoken; framing differs by mode only.
+    const spoken =
+      mode === "repeat"
+        ? `Repeat after me. ${text}`
+        : mode === "encouragement"
+          ? `Be encouraged. ${text} ${ref}.`
+          : mode === "memory"
+            ? `Remember this verse. ${text} ${ref}.`
+            : `${text} ${ref}.`;
 
+    const utterance = new SpeechSynthesisUtterance(spoken);
+    utterance.rate = 0.82;
+    utterance.pitch = 1.0;
+    utterance.volume = this.voiceVolume;
+
+    // Select and cache the best available voice for the current gender preference.
+    try {
+      if (!this.cachedVoice) {
+        this.cachedVoice = this.selectBestVoice(this.voiceGender);
+      }
+      if (this.cachedVoice) utterance.voice = this.cachedVoice;
+    } catch {
+      // getVoices may be empty on first call — fall back to default voice.
+    }
+
+    // Gently lower the worship pad so the Word is clear above the music.
+    this.duckMusic(Math.max(4, Math.min(9, text.length * 0.08)));
+
+    utterance.onstart = () => { this.speechUnlocked = true; };
     try {
       window.speechSynthesis.speak(utterance);
     } catch {
@@ -234,6 +538,55 @@ class SoundEngine {
       // Legendary/Kingdom: add a low triumphant swell.
       this.tone(root / 2, { type: "sawtooth", dur: 0.8, vol: 0.18, delay: 0.1 });
     }
+  }
+
+  /** Gentle "heavenly shimmer" — two sine waves with a reverb-like shimmer effect. */
+  playScriptureChime() {
+    const ctx = this.ensure();
+    if (!ctx || !this.master || this.muted) return;
+    const dur = 0.8;
+    // Primary shimmer tones
+    this.tone(880, { type: "sine", dur, vol: 0.12 });
+    this.tone(1108, { type: "sine", dur, vol: 0.1, delay: 0.02 });
+    // Delayed echoes for reverb-like quality
+    this.tone(880, { type: "sine", dur: 0.5, vol: 0.07, delay: 0.15 });
+    this.tone(1108, { type: "sine", dur: 0.45, vol: 0.06, delay: 0.18 });
+    this.tone(1320, { type: "sine", dur: 0.4, vol: 0.05, delay: 0.3 });
+  }
+
+  /** Triumphant C-major chord fanfare for scripture mastery. */
+  playMasteryFanfare() {
+    if (this.muted) return;
+    // C major triad: C5 (523 Hz), E5 (659 Hz), G5 (784 Hz)
+    this.tone(523, { type: "triangle", dur: 1.2, vol: 0.22 });
+    this.tone(659, { type: "triangle", dur: 1.2, vol: 0.2, delay: 0.06 });
+    this.tone(784, { type: "triangle", dur: 1.2, vol: 0.2, delay: 0.12 });
+    // Choir-like upper harmony
+    this.tone(1046, { type: "sine", dur: 1.0, vol: 0.14, delay: 0.18 });
+    this.tone(1318, { type: "sine", dur: 0.8, vol: 0.1, delay: 0.28 });
+    // Bass warmth
+    this.tone(261, { type: "sine", dur: 1.2, vol: 0.18, delay: 0.04 });
+  }
+
+  /** Single soft bell tone when scripture card appears. */
+  playScriptureCardAppear() {
+    if (this.muted) return;
+    this.tone(660, { type: "sine", dur: 0.4, vol: 0.18 });
+    this.tone(990, { type: "sine", dur: 0.25, vol: 0.08, delay: 0.06 });
+  }
+
+  /** Majestic ascending chord for Spirit of the Lord activation. */
+  playSpiritOfTheLord() {
+    this.play("spiritOfTheLord");
+  }
+
+  /** Warm rising two-note chime for friendship level-ups. */
+  playFriendshipLevelUp() {
+    if (this.muted) return;
+    // Two warm ascending notes (G4 -> C5) with a soft shimmer on top.
+    this.tone(392, { type: "triangle", dur: 0.35, vol: 0.22 });
+    this.tone(523, { type: "triangle", dur: 0.5, vol: 0.22, delay: 0.16 });
+    this.tone(1046, { type: "sine", dur: 0.4, vol: 0.1, delay: 0.22 });
   }
 
   play(name: SfxName) {
@@ -381,6 +734,81 @@ class SoundEngine {
         this.tone(1318, { type: "sine", dur: 0.5, vol: 0.2, delay: 0.4 });
         this.tone(261, { type: "triangle", dur: 0.7, vol: 0.18, delay: 0.3 });
         break;
+      case "spiritOfTheLord":
+        // Majestic ascending horn + choir shimmer — weighty but not chaotic.
+        this.tone(261, { type: "triangle", dur: 0.5, vol: 0.2 });
+        this.tone(329, { type: "triangle", dur: 0.5, vol: 0.2, delay: 0.1 });
+        this.tone(392, { type: "triangle", dur: 0.6, vol: 0.22, delay: 0.2 });
+        this.tone(523, { type: "triangle", dur: 0.8, vol: 0.24, delay: 0.32 });
+        this.tone(784, { type: "sine", dur: 1.0, vol: 0.18, delay: 0.5 });
+        this.tone(1046, { type: "sine", dur: 0.8, vol: 0.14, delay: 0.65 });
+        this.tone(1568, { type: "sine", dur: 0.5, vol: 0.1, delay: 0.82 });
+        break;
+      case "shoeEquip":
+        // Satisfying swoosh + sparkle — lighter than achievement.
+        this.noise({ dur: 0.08, vol: 0.15 });
+        this.tone(880, { type: "sine", dur: 0.12, vol: 0.22, slideTo: 1320 });
+        this.tone(1760, { type: "sine", dur: 0.18, vol: 0.15, delay: 0.1 });
+        break;
+      case "coinStreak":
+        // Rising excited arpeggio — more energetic than a regular coin.
+        this.tone(1318, { type: "triangle", dur: 0.07, vol: 0.22 });
+        this.tone(1568, { type: "triangle", dur: 0.07, vol: 0.22, delay: 0.05 });
+        this.tone(1760, { type: "triangle", dur: 0.08, vol: 0.24, delay: 0.1 });
+        this.tone(2093, { type: "sine", dur: 0.18, vol: 0.2, delay: 0.15 });
+        break;
+      case "finishLineApproach":
+        // Exciting ascending horn — "you're almost there!"
+        this.tone(392, { type: "triangle", dur: 0.18, vol: 0.22 });
+        this.tone(523, { type: "triangle", dur: 0.18, vol: 0.22, delay: 0.15 });
+        this.tone(659, { type: "triangle", dur: 0.22, vol: 0.24, delay: 0.3 });
+        this.tone(784, { type: "sine", dur: 0.55, vol: 0.26, delay: 0.48 });
+        break;
+      case "finishLineGate":
+        // Heavenly gate opening — shimmering, ethereal, awe-inspiring.
+        this.tone(523, { type: "sine", dur: 0.4, vol: 0.2 });
+        this.tone(659, { type: "sine", dur: 0.4, vol: 0.2, delay: 0.1 });
+        this.tone(784, { type: "sine", dur: 0.5, vol: 0.22, delay: 0.22 });
+        this.tone(1046, { type: "sine", dur: 0.7, vol: 0.2, delay: 0.38 });
+        this.tone(1318, { type: "sine", dur: 0.8, vol: 0.18, delay: 0.56 });
+        this.tone(1568, { type: "sine", dur: 0.7, vol: 0.14, delay: 0.72 });
+        this.tone(2093, { type: "sine", dur: 0.5, vol: 0.1, delay: 0.88 });
+        break;
+      case "victoryFanfare":
+        // Glorious triumph — 8-note ascending fanfare, choir-like.
+        this.tone(261, { type: "triangle", dur: 0.22, vol: 0.24 });
+        this.tone(329, { type: "triangle", dur: 0.22, vol: 0.24, delay: 0.16 });
+        this.tone(392, { type: "triangle", dur: 0.22, vol: 0.26, delay: 0.32 });
+        this.tone(523, { type: "triangle", dur: 0.28, vol: 0.28, delay: 0.48 });
+        this.tone(659, { type: "sawtooth", dur: 0.28, vol: 0.26, delay: 0.66 });
+        this.tone(784, { type: "sawtooth", dur: 0.32, vol: 0.28, delay: 0.84 });
+        this.tone(1046, { type: "sine", dur: 0.55, vol: 0.28, delay: 1.04 });
+        this.tone(1318, { type: "sine", dur: 0.9, vol: 0.26, delay: 1.3 });
+        // Harmonic shimmer underneath
+        this.tone(130, { type: "triangle", dur: 1.8, vol: 0.16, delay: 0.5 });
+        this.tone(196, { type: "triangle", dur: 1.5, vol: 0.14, delay: 0.7 });
+        break;
+      case "accuserFall":
+        // Satan falling backward — descending dissonant crash + impact.
+        this.tone(220, { type: "sawtooth", dur: 0.08, vol: 0.28, slideTo: 55 });
+        this.noise({ dur: 0.18, vol: 0.3 });
+        this.tone(110, { type: "square", dur: 0.3, vol: 0.22, delay: 0.08 });
+        break;
+      case "chainsBreak":
+        // Metal chains shattering — short metallic noise burst + high ping.
+        this.noise({ dur: 0.12, vol: 0.28 });
+        this.tone(2093, { type: "sine", dur: 0.06, vol: 0.2, delay: 0.04 });
+        this.noise({ dur: 0.08, vol: 0.22, delay: 0.15 });
+        this.tone(1760, { type: "sine", dur: 0.06, vol: 0.18, delay: 0.18 });
+        break;
+      case "heavenlyCheer":
+        // Warm crowd cheer shimmer — children celebrating victory.
+        this.noise({ dur: 0.6, vol: 0.12 });
+        this.tone(784, { type: "sine", dur: 0.5, vol: 0.18, delay: 0.05 });
+        this.tone(1046, { type: "sine", dur: 0.5, vol: 0.16, delay: 0.18 });
+        this.tone(1318, { type: "sine", dur: 0.45, vol: 0.14, delay: 0.32 });
+        this.tone(1568, { type: "sine", dur: 0.4, vol: 0.12, delay: 0.44 });
+        break;
     }
   }
 
@@ -406,8 +834,13 @@ class SoundEngine {
 
     const playBar = () => {
       if (this.muted || !this.musicEnabled) return;
-      const urgent = this.musicTension > 0.6;
-      const chords = urgent ? tenseChords : calmChords;
+      // Finish-line approach also reads as "urgent" so the bed stays warm and
+      // makes room for the rising pulse — but it's holy adrenaline, not danger.
+      const approaching = this.finishApproach > 0;
+      const urgent = this.musicTension > 0.6 || approaching;
+      // During the finish run-up we keep the brighter major progression — the
+      // feeling is victory pressure, never the minor "danger" colour.
+      const chords = urgent && !approaching ? tenseChords : calmChords;
       const chord = chords[this.musicStep % chords.length];
       this.musicStep++;
 
@@ -420,8 +853,8 @@ class SoundEngine {
         this.tone(f * 2, { type: "triangle", dur: 1.9, vol: harmVol, out: this.musicGain! });
       }
 
-      // Danger: add a low doom pulse on the bass note.
-      if (urgent) {
+      // Danger: add a low doom pulse on the bass note (Accuser closing in).
+      if (urgent && !approaching) {
         this.tone(chord[0] / 2, {
           type: "sawtooth", dur: 0.4, vol: 0.28, out: this.musicGain!,
         });
@@ -429,11 +862,48 @@ class SoundEngine {
           type: "sawtooth", dur: 0.3, vol: 0.2, delay: 0.5, out: this.musicGain!,
         });
       }
+
+      // ── Phase 16.1 — holy adrenaline as the finish line nears ──────────────
+      if (approaching) {
+        // Warm cinematic heartbeat on the bass — two soft pulses per bar.
+        this.tone(chord[0] / 2, {
+          type: "sine", dur: 0.22, vol: 0.22, out: this.musicGain!,
+        });
+        this.tone(chord[0] / 2, {
+          type: "sine", dur: 0.18, vol: 0.16, delay: 0.42, out: this.musicGain!,
+        });
+        // Rising pulse — a gentle ascending fifth that lifts the energy.
+        this.tone(chord[1], {
+          type: "triangle", dur: 0.5, vol: 0.12, out: this.musicGain!,
+        });
+
+        if (this.finishApproach >= 2) {
+          // Final 15s: trumpet-like victory swell + golden shimmer on top.
+          this.tone(chord[0] * 2, {
+            type: "sawtooth", dur: 0.6, vol: 0.14, out: this.musicGain!,
+          });
+          this.tone(chord[2] * 2, {
+            type: "sine", dur: 0.7, vol: 0.1, delay: 0.2, out: this.musicGain!,
+          });
+          // Golden shimmer — high, soft, awe-inspiring.
+          this.tone(chord[0] * 4, {
+            type: "sine", dur: 0.4, vol: 0.05, delay: 0.3, out: this.musicGain!,
+          });
+        }
+      }
     };
 
     playBar();
-    // Bars are shorter when tense — faster tempo.
-    const barMs = () => this.musicTension > 0.6 ? 1400 : 2000;
+    // Bars are shorter when tense — faster tempo. The finish run-up tightens
+    // further, and the final 15s pushes hardest for victory pressure.
+    const barMs = () =>
+      this.finishApproach >= 2
+        ? 1000
+        : this.finishApproach === 1
+          ? 1200
+          : this.musicTension > 0.6
+            ? 1400
+            : 2000;
     const schedule = () => {
       if (this.musicTimer === null) return;
       playBar();
@@ -442,12 +912,151 @@ class SoundEngine {
     this.musicTimer = window.setTimeout(schedule, barMs()) as unknown as number;
   }
 
+  /** Lazily build (once) a 2s mono white-noise buffer for looping ambient beds. */
+  private getNoiseBuffer(ctx: AudioContext): AudioBuffer {
+    if (this.ambientNoiseBuffer) return this.ambientNoiseBuffer;
+    const len = ctx.sampleRate * 2;
+    const buf = ctx.createBuffer(1, len, ctx.sampleRate);
+    const data = buf.getChannelData(0);
+    for (let i = 0; i < len; i++) data[i] = Math.random() * 2 - 1;
+    this.ambientNoiseBuffer = buf;
+    return buf;
+  }
+
+  /**
+   * Start a subtle, procedural per-venue ambient bed UNDER the worship music and
+   * scripture voice. One looping filtered-noise source + a slow LFO swell + at
+   * most one slow interval for an occasional soft tone. Gains are tiny (~0.03).
+   */
+  startVenueAmbient(venueId: string) {
+    const ctx = this.ensure();
+    if (!ctx || !this.master) return;
+    this.stopVenueAmbient();
+    this.ambientVenue = venueId;
+    if (this.muted) return; // remembered above; a later restart will honor it
+
+    const now = ctx.currentTime;
+
+    // Per-venue character tuning.
+    let filterType: BiquadFilterType = "lowpass";
+    let baseFreq = 500;
+    let q = 0.7;
+    let bedGain = 0.03;
+    let lfoRate = 0.07; // slow swell, Hz
+    let lfoDepth = 200; // filter freq sweep amount
+    switch (venueId) {
+      case "boardwalk": // soft ocean wash + warm breeze
+        filterType = "lowpass"; baseFreq = 480; q = 0.6; bedGain = 0.035; lfoRate = 0.06; lfoDepth = 220;
+        break;
+      case "river": // gentle water flow, brighter/lighter than ocean
+        filterType = "bandpass"; baseFreq = 1100; q = 1.2; bedGain = 0.028; lfoRate = 0.13; lfoDepth = 400;
+        break;
+      case "mountain": // airy, breathy wind
+        filterType = "lowpass"; baseFreq = 700; q = 0.5; bedGain = 0.03; lfoRate = 0.05; lfoDepth = 300;
+        break;
+      case "city": // soft high shimmer pad (very gentle)
+        filterType = "bandpass"; baseFreq = 1600; q = 0.9; bedGain = 0.022; lfoRate = 0.09; lfoDepth = 300;
+        break;
+      default:
+        filterType = "lowpass"; baseFreq = 600; q = 0.6; bedGain = 0.03; lfoRate = 0.07; lfoDepth = 250;
+        break;
+    }
+
+    // Looping filtered-noise bed.
+    const src = ctx.createBufferSource();
+    src.buffer = this.getNoiseBuffer(ctx);
+    src.loop = true;
+
+    const filter = ctx.createBiquadFilter();
+    filter.type = filterType;
+    filter.frequency.value = baseFreq;
+    filter.Q.value = q;
+
+    const gain = ctx.createGain();
+    gain.gain.value = 0;
+    // Gentle fade-in so it never "pops" in.
+    gain.gain.setValueAtTime(0, now);
+    gain.gain.linearRampToValueAtTime(bedGain, now + 2.5);
+
+    // Slow LFO swells the filter cutoff for a breathing/wash motion.
+    const lfo = ctx.createOscillator();
+    lfo.type = "sine";
+    lfo.frequency.value = lfoRate;
+    const lfoGain = ctx.createGain();
+    lfoGain.gain.value = lfoDepth;
+    lfo.connect(lfoGain).connect(filter.frequency);
+
+    src.connect(filter).connect(gain).connect(this.master);
+    src.start(now);
+    lfo.start(now);
+
+    // Optional rare, soft accent tone per venue via a slow interval.
+    let accentTimer: number | null = null;
+    const scheduleAccent = (everyMs: number, fire: () => void) => {
+      accentTimer = window.setInterval(() => {
+        if (this.muted) return;
+        // Only ~50% of the time so accents feel occasional, not metronomic.
+        if (Math.random() < 0.5) fire();
+      }, everyMs) as unknown as number;
+    };
+
+    if (venueId === "city") {
+      // Distant soft bell — rare.
+      scheduleAccent(22000, () => {
+        this.tone(1318.51, { type: "sine", dur: 1.6, vol: 0.018, out: this.master! });
+        this.tone(1975.5, { type: "sine", dur: 1.2, vol: 0.01, delay: 0.04, out: this.master! });
+      });
+    } else if (venueId === "river") {
+      // Soft high chime.
+      scheduleAccent(18000, () => {
+        this.tone(1567.98, { type: "sine", dur: 1.0, vol: 0.016, out: this.master! });
+        this.tone(2349.32, { type: "sine", dur: 0.8, vol: 0.009, delay: 0.05, out: this.master! });
+      });
+    } else if (venueId === "mountain") {
+      // Very occasional soft high tone (eagle/choir hint).
+      scheduleAccent(28000, () => {
+        this.tone(1046.5, { type: "sine", dur: 2.0, vol: 0.016, out: this.master! });
+        this.tone(1567.98, { type: "sine", dur: 1.6, vol: 0.008, delay: 0.08, out: this.master! });
+      });
+    }
+
+    this.ambientNodes = {
+      stop: () => {
+        const t = ctx.currentTime;
+        try {
+          gain.gain.cancelScheduledValues(t);
+          gain.gain.setValueAtTime(gain.gain.value, t);
+          gain.gain.linearRampToValueAtTime(0, t + 0.4);
+        } catch { /* noop */ }
+        try { src.stop(t + 0.5); } catch { /* noop */ }
+        try { lfo.stop(t + 0.5); } catch { /* noop */ }
+        try { src.disconnect(); } catch { /* noop */ }
+        try { lfo.disconnect(); } catch { /* noop */ }
+        try { lfoGain.disconnect(); } catch { /* noop */ }
+        try { filter.disconnect(); } catch { /* noop */ }
+        try { gain.disconnect(); } catch { /* noop */ }
+        if (accentTimer !== null) { clearInterval(accentTimer); accentTimer = null; }
+      },
+    };
+  }
+
+  /** Stop and tear down the venue ambient bed, clearing any accent interval. */
+  stopVenueAmbient() {
+    if (this.ambientNodes) {
+      try { this.ambientNodes.stop(); } catch { /* noop */ }
+      this.ambientNodes = null;
+    }
+    this.ambientVenue = null;
+  }
+
   stopMusic() {
     if (this.musicTimer !== null) {
       clearTimeout(this.musicTimer);
       clearInterval(this.musicTimer); // safety for both timer styles
       this.musicTimer = null;
     }
+    // Clear finish-line adrenaline so a fresh run (or a pause) starts calm.
+    this.finishApproach = 0;
   }
 }
 

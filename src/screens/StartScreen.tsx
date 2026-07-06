@@ -3,8 +3,29 @@ import type { SaveData, Screen } from "../types";
 import { Button } from "../components/Button";
 import { DailyBlessing } from "../components/DailyBlessing";
 import { getCharacter } from "../data/characters";
-import { KINGDOM_SCENES } from "../data/kingdomScenes";
 import { todayKey, yesterdayKey } from "../utils/storage";
+import {
+  accountLevel,
+  accountLevelProgress,
+  boardFraction,
+  achievementFraction,
+  kingdomRank,
+} from "../data/progression";
+import { masteryFraction } from "../data/challenges";
+
+function MiniBar({ label, frac, color }: { label: string; frac: number; color: string }) {
+  return (
+    <div className="flex-1">
+      <div className="flex items-center justify-between text-[10px] font-bold text-white/70">
+        <span>{label}</span>
+        <span>{Math.round(frac * 100)}%</span>
+      </div>
+      <div className="mt-0.5 h-1.5 overflow-hidden rounded-full bg-black/30">
+        <div className="h-full rounded-full transition-all" style={{ width: `${frac * 100}%`, background: color }} />
+      </div>
+    </div>
+  );
+}
 
 export function StartScreen({
   save,
@@ -16,38 +37,54 @@ export function StartScreen({
   onClaimDaily: (coins: number, nextStreak: number) => void;
 }) {
   const ch = getCharacter(save.selectedCharacter);
+  const level = accountLevel(save);
+  const rank = kingdomRank(save);
   const dailyEligible = save.lastDailyClaim !== todayKey();
   const nextStreak = save.lastDailyClaim === yesterdayKey() ? save.dailyStreak + 1 : 1;
-  const sceneCycleDuration = KINGDOM_SCENES.length * 5;
 
   return (
-    <div className="relative flex h-full flex-col items-center justify-between overflow-hidden bg-night px-6 py-10 safe-top safe-bottom">
-      <div className="pointer-events-none absolute inset-0">
-        {KINGDOM_SCENES.map((scene, index) => (
-          <motion.div
-            key={scene.id}
-            className="absolute inset-0 bg-cover bg-center"
-            style={{ backgroundImage: `url(${scene.image})` }}
-            initial={{ opacity: index === 0 ? 1 : 0, scale: 1.06 }}
-            animate={{ opacity: [0, 1, 1, 0], scale: [1.08, 1.03, 1.01, 1] }}
-            transition={{
-              delay: index * 5,
-              duration: 5,
-              repeat: Infinity,
-              repeatDelay: sceneCycleDuration - 5,
-              ease: "easeInOut",
-            }}
-          />
-        ))}
-        <div className="absolute inset-0 bg-gradient-to-b from-[#04112f]/35 via-[#08101d]/42 to-[#050816]/86" />
-        <div className="absolute inset-0 bg-[radial-gradient(circle_at_50%_15%,rgba(255,231,145,0.45),transparent_28%),radial-gradient(circle_at_50%_80%,rgba(14,165,233,0.25),transparent_35%)]" />
-      </div>
+    <div className="relative flex h-full flex-col items-center justify-between overflow-hidden bg-gradient-to-b from-[#1e2a78] via-[#7a4fb0] to-[#f08a4b] px-6 py-10 safe-top safe-bottom">
       {dailyEligible && (
         <DailyBlessing
           streak={nextStreak}
           onClaim={(coins) => onClaimDaily(coins, nextStreak)}
         />
       )}
+      {/* Distant heaven-light — the victory glow we run toward. */}
+      <div
+        className="pointer-events-none absolute left-1/2 top-0 h-72 w-[140%] -translate-x-1/2"
+        style={{
+          background:
+            "radial-gradient(60% 80% at 50% 0%, rgba(255,244,204,0.5), rgba(255,224,138,0.18) 45%, transparent 70%)",
+        }}
+      />
+      <motion.div
+        className="pointer-events-none absolute left-1/2 top-10 h-40 w-1.5 -translate-x-1/2 rounded-full"
+        style={{ background: "linear-gradient(to bottom, rgba(255,247,204,0.85), transparent)" }}
+        animate={{ opacity: [0.4, 0.9, 0.4] }}
+        transition={{ duration: 3.5, repeat: Infinity, ease: "easeInOut" }}
+      />
+
+      {/* Subtle light beams — slow diagonal gradient streaks. */}
+      {[
+        { left: "20%", delay: 0, dur: 9 },
+        { left: "52%", delay: 3, dur: 11 },
+        { left: "78%", delay: 6, dur: 10 },
+      ].map((b, i) => (
+        <motion.div
+          key={`beam-${i}`}
+          className="pointer-events-none absolute top-[-30%] h-[160%] w-24 -translate-x-1/2"
+          style={{
+            left: b.left,
+            transform: "rotate(18deg)",
+            background:
+              "linear-gradient(to bottom, transparent, rgba(255,247,214,0.10) 45%, transparent)",
+          }}
+          animate={{ opacity: [0, 0.7, 0], x: ["-10px", "10px", "-10px"] }}
+          transition={{ duration: b.dur, repeat: Infinity, ease: "easeInOut", delay: b.delay }}
+        />
+      ))}
+
       {/* Animated background orbs */}
       {[...Array(8)].map((_, i) => (
         <motion.div
@@ -91,13 +128,24 @@ export function StartScreen({
         initial={{ scale: 0.9, opacity: 0 }}
         animate={{ scale: 1, opacity: 1 }}
         transition={{ delay: 0.15 }}
-        className="z-10 flex items-center gap-3 rounded-2xl bg-black/30 px-5 py-3 backdrop-blur-sm"
+        className="z-10 flex items-center gap-3 rounded-2xl border border-white/10 bg-black/30 px-5 py-3.5 shadow-lg shadow-black/20 backdrop-blur-md"
       >
-        <span className="text-2xl">🏃</span>
+        <div className="relative flex h-10 w-10 items-center justify-center">
+          <motion.div
+            className="pointer-events-none absolute inset-0 rounded-full"
+            style={{
+              background:
+                "radial-gradient(circle, rgba(255,224,138,0.85) 0%, rgba(255,224,138,0.25) 45%, transparent 70%)",
+            }}
+            animate={{ scale: [0.85, 1.15, 0.85], opacity: [0.5, 0.9, 0.5] }}
+            transition={{ duration: 2.6, repeat: Infinity, ease: "easeInOut" }}
+          />
+          <span className="relative text-2xl">🏃</span>
+        </div>
         <div className="text-left">
           <p className="text-sm text-white/60">Running as</p>
           <p className="font-extrabold" style={{ color: ch.colors.secondary }}>
-            {ch.name} · {ch.title}
+            {ch.name} · {ch.clothingText}
           </p>
         </div>
         <div className="ml-4 border-l border-white/20 pl-4 text-left">
@@ -122,33 +170,71 @@ export function StartScreen({
             ▶ PLAY
           </Button>
         </motion.div>
-        <div className="grid grid-cols-2 gap-3">
-          <Button variant="secondary" onClick={() => go("venues")}>
-            🏝 Venues
-          </Button>
-          <Button variant="secondary" onClick={() => go("characters")}>
+        <div className="grid grid-cols-2 gap-2.5">
+          <Button variant="secondary" className="w-full" onClick={() => go("characters")}>
             🏃 Characters
           </Button>
-          <Button variant="secondary" onClick={() => go("boards")}>
+          <Button variant="secondary" className="w-full" onClick={() => go("boards")}>
             🛹 Boards
           </Button>
-          <Button variant="secondary" onClick={() => go("collection")}>
+          <Button variant="secondary" className="w-full" onClick={() => go("collection")}>
             📚 Collection
           </Button>
-          <Button variant="secondary" onClick={() => go("missions")}>
+          <Button variant="secondary" className="w-full" onClick={() => go("missions")}>
             ⭐ Missions
           </Button>
-          <Button variant="secondary" onClick={() => go("upgrades")}>
+          <Button variant="secondary" className="w-full" onClick={() => go("scripture")}>
+            📖 Scripture
+          </Button>
+          <Button variant="secondary" className="w-full" onClick={() => go("upgrades")}>
             ⬆ Upgrades
           </Button>
+          <Button variant="secondary" className="w-full" onClick={() => go("venues")}>
+            🗺️ Venues
+          </Button>
+          <Button variant="secondary" className="w-full" onClick={() => go("shoes")}>
+            👟 Shoes
+          </Button>
+          <Button variant="secondary" className="w-full" onClick={() => go("settings")}>
+            ⚙ Settings
+          </Button>
         </div>
-        <Button variant="secondary" onClick={() => go("settings")}>
-          ⚙ Settings
+        <Button
+          variant="secondary"
+          className="w-full border-violet-300/40 bg-violet-400/10"
+          onClick={() => go("cosmetics")}
+        >
+          🛍️ Cosmetics Shop
         </Button>
-        <p className="mt-1 text-center text-sm text-white/70">
-          💰 {save.totalCoins.toLocaleString()} Light Coins · ✨{" "}
-          {save.totalXp.toLocaleString()} XP
-        </p>
+        <Button
+          variant="secondary"
+          className="w-full border-gold-300/40 bg-gold-400/10"
+          onClick={() => go("dashboard")}
+        >
+          👨‍👩‍👧 Parent Hub
+        </Button>
+        {/* Layered progression — always something climbing. */}
+        <div className="rounded-2xl border border-white/10 bg-black/30 px-4 py-3.5 shadow-lg shadow-black/20 backdrop-blur-md">
+          <div className="flex items-center justify-between">
+            <p className="text-sm font-extrabold text-white/90">
+              {rank.icon} Lvl {level} · <span className="text-gold-300">{rank.name}</span>
+            </p>
+            <p className="text-xs font-bold text-white/70">
+              💰 {save.totalCoins.toLocaleString()} · ✨ {save.totalXp.toLocaleString()}
+            </p>
+          </div>
+          <div className="mt-1.5 h-1.5 overflow-hidden rounded-full bg-black/30">
+            <div
+              className="h-full rounded-full bg-gradient-to-r from-gold-300 to-gold-500 transition-all"
+              style={{ width: `${accountLevelProgress(save) * 100}%` }}
+            />
+          </div>
+          <div className="mt-2 flex gap-3">
+            <MiniBar label="🛹 Boards" frac={boardFraction(save)} color="#38bdf8" />
+            <MiniBar label="📖 Scripture" frac={masteryFraction(save)} color="#fbbf24" />
+            <MiniBar label="🏆 Awards" frac={achievementFraction(save)} color="#34d399" />
+          </div>
+        </div>
       </motion.div>
     </div>
   );

@@ -1,10 +1,36 @@
 import { motion } from "framer-motion";
-import { KINGDOM_SCENES } from "../data/kingdomScenes";
+import type { SaveData, VenueDef, VenueId } from "../types";
+import { VENUES } from "../data/venues";
 import { Button } from "../components/Button";
+import { sound } from "../audio/SoundEngine";
 
-export function VenuesScreen({ onBack, onPlay }: { onBack: () => void; onPlay: () => void }) {
+/**
+ * Phase 16.8 — real painted-world preview using the venue's actual in-game
+ * backdrop photo (object-cover), replacing the code-drawn mini scene. Sells
+ * the exact world the player is about to run through, one-for-one with
+ * what the live renderer now shows.
+ */
+function VenueScene({ v }: { v: VenueDef }) {
+  if (!v.bgImage) return <div style={{ background: v.skyMid }} className="h-full w-full" />;
   return (
-    <div className="safe-top safe-bottom flex h-full flex-col overflow-hidden bg-gradient-to-b from-night via-[#10265a] to-[#321a4a] px-4 py-6 text-white">
+    <div
+      className="h-full w-full bg-cover bg-center"
+      style={{ backgroundImage: `url(${v.bgImage})`, backgroundPosition: "50% 30%" }}
+    />
+  );
+}
+
+export function VenuesScreen({
+  save,
+  onSelect,
+  onBack,
+}: {
+  save: SaveData;
+  onSelect: (id: VenueId) => void;
+  onBack: () => void;
+}) {
+  return (
+    <div className="safe-top safe-bottom flex h-full flex-col bg-gradient-to-b from-night via-[#16204a] to-[#321a4a] px-4 py-6">
       <div className="mb-3 flex items-center justify-between">
         <Button variant="ghost" onClick={onBack}>
           ← Back
@@ -13,55 +39,65 @@ export function VenuesScreen({ onBack, onPlay }: { onBack: () => void; onPlay: (
         <div className="w-16" />
       </div>
 
-      <div className="mb-3 rounded-3xl border border-gold-300/30 bg-black/25 p-4 shadow-2xl shadow-gold-500/10 backdrop-blur-sm">
-        <p className="text-xs font-black uppercase tracking-[0.28em] text-gold-200/80">
-          Kingdom Runways
-        </p>
-        <p className="mt-1 text-sm text-white/70">
-          Choose the coastal world mood for Christian Surfers. These are the new premium
-          venues you sent over, staged as collectible level destinations.
-        </p>
-      </div>
+      <p className="mb-3 text-center text-xs text-white/55">
+        Choose the world your runner journeys through.
+      </p>
 
       <div className="flex-1 space-y-3 overflow-y-auto pb-4">
-        {KINGDOM_SCENES.map((scene, index) => (
-          <motion.div
-            key={scene.id}
-            initial={{ y: 18, opacity: 0 }}
-            animate={{ y: 0, opacity: 1 }}
-            transition={{ delay: index * 0.045 }}
-            className="group overflow-hidden rounded-3xl border border-white/15 bg-white/7 shadow-xl shadow-black/25"
-          >
-            <div
-              className="relative h-40 bg-cover bg-center sm:h-52"
-              style={{ backgroundImage: `url(${scene.image})` }}
+        {VENUES.map((v, i) => {
+          const selected = save.selectedVenue === v.id;
+          return (
+            <motion.div
+              key={v.id}
+              initial={{ y: 14, opacity: 0 }}
+              animate={{ y: 0, opacity: 1 }}
+              transition={{ delay: i * 0.05 }}
+              whileTap={{ scale: 0.98 }}
+              onClick={() => {
+                if (!selected) {
+                  sound.play("click");
+                  onSelect(v.id);
+                }
+              }}
+              className="cursor-pointer overflow-hidden rounded-2xl border-2 backdrop-blur-md transition-all"
+              style={{
+                borderColor: selected ? v.roadEdge : "rgba(255,255,255,0.12)",
+                boxShadow: selected ? `0 0 22px ${v.roadEdge}66` : "0 6px 16px rgba(0,0,0,0.25)",
+              }}
             >
-              <div className="absolute inset-0 bg-gradient-to-t from-[#040816] via-[#040816]/18 to-transparent" />
-              <div className="absolute left-3 top-3 rounded-full border border-white/20 bg-black/40 px-3 py-1 text-[10px] font-black uppercase tracking-[0.18em] text-gold-200 backdrop-blur-sm">
-                Venue {index + 1}
+              {/* Scene preview */}
+              <div className="relative h-28 w-full">
+                <VenueScene v={v} />
+                <span className="absolute left-2 top-2 rounded-full bg-black/45 px-2 py-0.5 text-lg backdrop-blur-sm">
+                  {v.emblem}
+                </span>
+                {selected && (
+                  <span
+                    className="absolute right-2 top-2 rounded-full px-2.5 py-1 text-[10px] font-black uppercase tracking-wider text-night"
+                    style={{ background: v.roadEdge }}
+                  >
+                    ✓ Running Here
+                  </span>
+                )}
               </div>
-              <div className="absolute bottom-3 left-3 right-3">
-                <h3 className="font-display text-2xl leading-none text-white drop-shadow-[0_2px_10px_rgba(0,0,0,0.85)]">
-                  {scene.title}
-                </h3>
-                <p className="mt-1 text-xs font-semibold text-white/75 drop-shadow">
-                  {scene.subtitle}
-                </p>
-              </div>
-            </div>
-            <div className="flex items-center justify-between gap-3 px-3 py-3">
-              <p className="text-[11px] font-bold uppercase tracking-[0.16em] text-white/45">
-                Premium coastal kingdom path
-              </p>
-              <button
-                onClick={onPlay}
-                className="shrink-0 rounded-xl bg-gold-400 px-4 py-2 text-xs font-black text-night shadow-lg shadow-gold-400/20 transition-transform active:scale-95"
+              {/* Info bar */}
+              <div
+                className="flex items-center justify-between gap-3 px-3 py-2.5"
+                style={{ background: selected ? `${v.skyMid}40` : "rgba(255,255,255,0.05)" }}
               >
-                PLAY HERE
-              </button>
-            </div>
-          </motion.div>
-        ))}
+                <div className="min-w-0">
+                  <p className="truncate text-sm font-extrabold text-white">{v.name}</p>
+                  <p className="line-clamp-1 text-[11px] text-white/55">{v.desc}</p>
+                </div>
+                {!selected && (
+                  <span className="shrink-0 rounded-xl bg-violet-500 px-3 py-2 text-xs font-extrabold text-white shadow-lg shadow-violet-500/20">
+                    Select
+                  </span>
+                )}
+              </div>
+            </motion.div>
+          );
+        })}
       </div>
     </div>
   );

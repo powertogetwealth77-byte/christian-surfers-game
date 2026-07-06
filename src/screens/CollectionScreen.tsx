@@ -46,8 +46,8 @@ export function CollectionScreen({
               sound.play("click");
               setTab(t);
             }}
-            className={`rounded-xl py-2 text-xs font-extrabold transition-colors ${
-              tab === t ? "bg-gold-400 text-night" : "bg-white/10 text-white/70"
+            className={`rounded-xl py-2 text-xs font-extrabold transition-all active:scale-95 ${
+              tab === t ? "bg-gold-400 text-night shadow-lg shadow-gold-400/20" : "bg-white/10 text-white/70"
             }`}
           >
             {label}
@@ -65,7 +65,7 @@ export function CollectionScreen({
                 initial={{ y: 12, opacity: 0 }}
                 animate={{ y: 0, opacity: 1 }}
                 transition={{ delay: i * 0.04 }}
-                className="rounded-2xl border-2 p-3"
+                className="rounded-2xl border-2 p-3 shadow-lg shadow-black/20 backdrop-blur-md"
                 style={{ borderColor: `${rm.color}66`, background: "rgba(255,255,255,0.04)" }}
               >
                 <div className="flex items-center justify-between">
@@ -73,14 +73,14 @@ export function CollectionScreen({
                     {ch.name} <span className="text-xs text-white/50">· {ch.tagline}</span>
                   </p>
                   <span
-                    className="rounded-md px-2 py-0.5 text-[10px] font-black uppercase"
+                    className="rounded-full px-2 py-0.5 text-[10px] font-black uppercase shadow-sm shadow-black/30"
                     style={{ background: rm.color, color: "#1a1020" }}
                   >
                     {rm.label}
                   </span>
                 </div>
                 <p className="mt-1 text-[11px] italic text-white/55">{ch.bio}</p>
-                <p className="mt-1 text-[11px] text-white/70">📖 {ch.scripture} · ✨ {ch.signaturePower}</p>
+                <p className="mt-1 text-[11px] text-white/70">📖 {ch.favoriteScripture} · ✨ {ch.signaturePower}</p>
               </motion.div>
             );
           })}
@@ -95,7 +95,7 @@ export function CollectionScreen({
                 initial={{ y: 12, opacity: 0 }}
                 animate={{ y: 0, opacity: 1 }}
                 transition={{ delay: i * 0.02 }}
-                className="flex items-center gap-3 rounded-2xl border-2 p-3"
+                className="flex items-center gap-3 rounded-2xl border-2 p-3 shadow-lg shadow-black/20 backdrop-blur-md"
                 style={{ borderColor: owned ? `${rm.color}88` : "rgba(255,255,255,0.1)", background: "rgba(255,255,255,0.04)" }}
               >
                 <div
@@ -135,7 +135,7 @@ export function CollectionScreen({
                 initial={{ y: 12, opacity: 0 }}
                 animate={{ y: 0, opacity: 1 }}
                 transition={{ delay: i * 0.03 }}
-                className={`rounded-2xl border-2 p-3 ${
+                className={`rounded-2xl border-2 p-3 shadow-lg shadow-black/20 backdrop-blur-md transition-all ${
                   done ? "border-gold-400/60 bg-gold-400/10" : "border-white/12 bg-white/5"
                 }`}
               >
@@ -152,7 +152,7 @@ export function CollectionScreen({
                         sound.play("achievement");
                         onClaim(a.id, a.reward);
                       }}
-                      className="shrink-0 rounded-xl bg-violet-500 px-3 py-2 text-xs font-extrabold text-white"
+                      className="shrink-0 rounded-xl bg-violet-500 px-3 py-2 text-xs font-extrabold text-white shadow-lg shadow-violet-500/20 transition-all active:scale-95"
                     >
                       +{a.reward} 💰
                     </button>
@@ -160,7 +160,7 @@ export function CollectionScreen({
                     <span className="shrink-0 text-xs font-extrabold text-emerald-300">✓ CLAIMED</span>
                   ) : null}
                 </div>
-                <div className="mt-2 h-2 overflow-hidden rounded-full bg-white/10">
+                <div className="mt-2 h-2 overflow-hidden rounded-full bg-black/30">
                   <div
                     className="h-full rounded-full bg-gradient-to-r from-violet-500 to-gold-400"
                     style={{ width: `${pct * 100}%` }}
