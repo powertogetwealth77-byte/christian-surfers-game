@@ -456,7 +456,7 @@ export const BOARDS: BoardDef[] = [
     lore: "I am the bread of life: he that cometh to me shall never hunger.",
   },
   {
-    id: "goodShepherd", name: "Good Shepherd Board", cost: 360, text: "JOHN 10:11",
+    id: "goodShepherdPasture", name: "Good Shepherd Board", cost: 360, text: "JOHN 10:11",
     emblem: "🐑", desc: "Soft green pasture deck with a gentle wool-white trail.",
     color: "#4d7c0f", edge: "#d9f99d", trail: "#ecfccb", rarity: "rare",
     lore: "I am the good shepherd: the good shepherd giveth his life for the sheep.",
@@ -487,13 +487,13 @@ export const BOARDS: BoardDef[] = [
   },
   // Epic
   {
-    id: "alphaOmega", name: "Alpha & Omega Board", cost: 1800, text: "REV 1:8",
+    id: "alphaOmegaCosmic", name: "Alpha & Omega Board", cost: 1800, text: "REV 1:8",
     emblem: "🔱", desc: "Deep cosmic deck with a swirling beginning-and-end trail.",
     color: "#4338ca", edge: "#a5b4fc", trail: "#e0e7ff", rarity: "epic",
     lore: "I am Alpha and Omega, the beginning and the ending, saith the Lord.",
   },
   {
-    id: "morningStar", name: "Bright Morning Star Board", cost: 2200, text: "REV 22:16",
+    id: "brightMorningStar", name: "Bright Morning Star Board", cost: 2200, text: "REV 22:16",
     emblem: "🌟", desc: "Dawn-violet deck with a shimmering starlight trail.",
     color: "#7c3aed", edge: "#ddd6fe", trail: "#fef9c3", rarity: "epic",
     lore: "I am the root and the offspring of David, and the bright and morning star.",
@@ -772,4 +772,29 @@ export const BOARDS: BoardDef[] = [
 
 export function getBoard(id: string): BoardDef {
   return BOARDS.find((b) => b.id === id) ?? BOARDS[0];
+}
+
+/**
+ * Codex review fix (PR #3, P2) — board ownership/equip state and React list
+ * keys all key off `b.id`, so a duplicate id would let one purchase mark
+ * two boards owned and make equip target the wrong deck. Guards against
+ * regressions the same way the id collision was found: a plain scan for
+ * repeated ids. Called once in dev (see below); no-op in production builds.
+ */
+export function findDuplicateBoardIds(): string[] {
+  const seen = new Set<string>();
+  const dupes = new Set<string>();
+  for (const b of BOARDS) {
+    if (seen.has(b.id)) dupes.add(b.id);
+    seen.add(b.id);
+  }
+  return [...dupes];
+}
+
+if (import.meta.env?.DEV) {
+  const dupes = findDuplicateBoardIds();
+  if (dupes.length > 0) {
+    // eslint-disable-next-line no-console
+    console.error("[boards] duplicate board ids detected:", dupes);
+  }
 }

@@ -8,6 +8,7 @@ import { Button } from "../components/Button";
 import { HolographicSkateboard } from "../components/HolographicSkateboard";
 import { sound } from "../audio/SoundEngine";
 import { trackCosmeticBrowse } from "../services/AnalyticsService";
+import { purchasesAvailable } from "../services/PurchaseService";
 
 type ShopTab = "shoes" | "boards";
 
@@ -164,7 +165,7 @@ export function CosmeticShopScreen({
                     <span className="text-[11px] font-bold text-emerald-300">✓ Owned</span>
                   ) : cosmetic.isPremium ? (
                     <span className="text-[11px] font-bold text-gold-300">
-                      💳 ${(cosmetic.cost / 100).toFixed(2)}
+                      {purchasesAvailable ? `💳 $${(cosmetic.cost / 100).toFixed(2)}` : "🚧 Soon"}
                     </span>
                   ) : cosmetic.cost === 0 ? (
                     <span className="text-[11px] font-bold text-emerald-300">⭐ Free</span>
@@ -241,16 +242,22 @@ export function CosmeticShopScreen({
             ) : (
               <button
                 onClick={handlePurchase}
-                disabled={purchasing || (!selected.isPremium && save.totalCoins < selected.cost)}
+                disabled={
+                  purchasing ||
+                  (selected.isPremium && !purchasesAvailable) ||
+                  (!selected.isPremium && save.totalCoins < selected.cost)
+                }
                 className="mt-4 w-full rounded-xl bg-gradient-to-b from-gold-300 to-gold-600 py-3 text-sm font-extrabold text-night shadow-lg shadow-gold-500/20 transition-all active:scale-95 disabled:opacity-50"
               >
-                {purchasing
-                  ? "Processing…"
-                  : selected.isPremium
-                    ? `Buy Now · $${(selected.cost / 100).toFixed(2)}`
-                    : selected.cost === 0
-                      ? "Unlock Free"
-                      : `Buy Now · 💰 ${selected.cost.toLocaleString()}`}
+                {selected.isPremium && !purchasesAvailable
+                  ? "🚧 Premium Unlock Coming Soon"
+                  : purchasing
+                    ? "Processing…"
+                    : selected.isPremium
+                      ? `Buy Now · $${(selected.cost / 100).toFixed(2)}`
+                      : selected.cost === 0
+                        ? "Unlock Free"
+                        : `Buy Now · 💰 ${selected.cost.toLocaleString()}`}
               </button>
             )}
           </motion.div>

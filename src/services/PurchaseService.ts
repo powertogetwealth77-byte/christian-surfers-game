@@ -79,6 +79,45 @@ export class LocalDevPurchaseProvider implements CosmeticPurchaseProvider {
   }
 }
 
+/**
+ * Codex review fix (PR #3, P1) — always-instant fake receipts must never be
+ * reachable from a real "Buy Now" button in a production build. Purchases
+ * fail closed at the receipt-validation layer already (see
+ * ReceiptValidator.ts), but that only surfaces as a generic "purchase
+ * failed" toast after the user taps Buy — this provider makes the
+ * unavailable state explicit and immediate, with no purchase attempt at all.
+ */
+export class UnavailablePurchaseProvider implements CosmeticPurchaseProvider {
+  async hasOwned(): Promise<boolean> {
+    return false;
+  }
+
+  async purchase(cosmeticId: string, type: CosmeticType): Promise<PurchaseResult> {
+    return {
+      success: false,
+      cosmeticId,
+      type,
+      error: "Purchases are not available yet in this build.",
+    };
+  }
+
+  async restoredCosmeticIds(): Promise<string[]> {
+    return [];
+  }
+}
+
+/**
+ * True only when it's safe to use the dev-stub provider: local Vite dev
+ * server, or an explicit opt-in flag for internal/staging builds. A plain
+ * `vite build` (what Vercel previews and production both run) has
+ * `import.meta.env.DEV === false`, so a standard preview build already
+ * falls through to `UnavailablePurchaseProvider` below.
+ */
+export const isDevPurchasesEnabled: boolean =
+  (typeof import.meta !== "undefined" && Boolean(import.meta.env?.DEV)) ||
+  (typeof import.meta !== "undefined" &&
+    import.meta.env?.VITE_ENABLE_DEV_PURCHASES === "true");
+
 export class PurchaseService {
   constructor(private provider: CosmeticPurchaseProvider) {}
 
@@ -99,4 +138,9 @@ export class PurchaseService {
   }
 }
 
-export const purchaseService = new PurchaseService(new LocalDevPurchaseProvider());
+/** True when the shop UI should present premium Buy Now as active/tappable. */
+export const purchasesAvailable = isDevPurchasesEnabled;
+
+export const purchaseService = new PurchaseService(
+  isDevPurchasesEnabled ? new LocalDevPurchaseProvider() : new UnavailablePurchaseProvider()
+);

@@ -36,7 +36,7 @@ import { ShoesScreen } from "./screens/ShoesScreen";
 import { CosmeticShopScreen } from "./screens/CosmeticShopScreen";
 import { getShoe } from "./data/shoes";
 import { getBoard } from "./data/boards";
-import { purchaseService } from "./services/PurchaseService";
+import { purchaseService, purchasesAvailable } from "./services/PurchaseService";
 import { trackCosmeticEquipped } from "./services/AnalyticsService";
 import { getFinishTierNumber } from "./data/finishLine";
 import type { finishRewards } from "./data/finishLine";
@@ -111,6 +111,10 @@ export default function App() {
   const handlePurchasePremium = useCallback(
     async (id: string, type: "shoe" | "board"): Promise<boolean> => {
       const cosmetic = type === "shoe" ? getShoe(id) : getBoard(id);
+      if (!purchasesAvailable) {
+        showToast("🚧 Purchases aren't available yet in this preview.");
+        return false;
+      }
       const result = await purchaseService.purchaseCosmetic(id, type, cosmetic.cost);
       if (!result.success) {
         showToast(`⚠️ Purchase failed: ${result.error ?? "please try again"}`);
@@ -232,6 +236,9 @@ export default function App() {
       setSave((s) => {
         const newVictories = correct ? (s.finishVictories ?? 0) + 1 : (s.finishVictories ?? 0);
         const newCorrect = correct ? (s.finishCorrectAnswers ?? 0) + 1 : (s.finishCorrectAnswers ?? 0);
+        // Codex review fix (PR #3, P2) — every finish-line answer counts as
+        // an attempt, correct or not, so accuracy has a real denominator.
+        const newAttempts = (s.finishAttempts ?? 0) + 1;
         const newStreak = correct ? (s.finishVictoryStreak ?? 0) + 1 : 0;
         const newLongest = Math.max(s.finishLongestStreak ?? 0, newStreak);
         const newTier = getFinishTierNumber(newVictories);
@@ -246,6 +253,7 @@ export default function App() {
           totalXp: s.totalXp + rewards.xp,
           finishVictories: newVictories,
           finishCorrectAnswers: newCorrect,
+          finishAttempts: newAttempts,
           finishScriptureTier: newTier,
           finishVictoryStreak: newStreak,
           finishLongestStreak: newLongest,

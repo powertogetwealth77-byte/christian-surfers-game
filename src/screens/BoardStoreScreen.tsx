@@ -7,6 +7,7 @@ import { Button } from "../components/Button";
 import { UnlockReveal } from "../components/UnlockReveal";
 import { HolographicSkateboard } from "../components/HolographicSkateboard";
 import { sound } from "../audio/SoundEngine";
+import { purchasesAvailable } from "../services/PurchaseService";
 
 const TIERS: Rarity[] = ["common", "rare", "epic", "legendary", "kingdom"];
 
@@ -141,7 +142,7 @@ export function BoardStoreScreen({
                           </button>
                         ) : b.isPremium ? (
                           <button
-                            disabled={isPurchasing}
+                            disabled={isPurchasing || !purchasesAvailable}
                             onClick={async () => {
                               sound.unlock();
                               setPurchasingId(b.id);
@@ -151,7 +152,11 @@ export function BoardStoreScreen({
                             }}
                             className="rounded-xl bg-gradient-to-b from-gold-300 to-gold-600 px-3 py-2 text-xs font-extrabold text-night shadow-lg shadow-gold-500/20 transition-all active:scale-95 disabled:opacity-50"
                           >
-                            {isPurchasing ? "…" : `💳 $${(b.cost / 100).toFixed(2)}`}
+                            {!purchasesAvailable
+                              ? "🚧 Soon"
+                              : isPurchasing
+                                ? "…"
+                                : `💳 $${(b.cost / 100).toFixed(2)}`}
                           </button>
                         ) : (
                           <button

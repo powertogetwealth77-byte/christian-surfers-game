@@ -3,7 +3,7 @@ import { AnimatePresence, motion } from "framer-motion";
 import type { RunStats, SaveData } from "../types";
 import { GameEngine } from "../game/engine";
 import { Renderer } from "../game/render";
-import { getCharacter } from "../data/characters";
+import { getCharacter, getCharacterAvatarGlyph } from "../data/characters";
 import { getBoard } from "../data/boards";
 import { getVenue } from "../data/venues";
 import { getShoe } from "../data/shoes";
@@ -1117,7 +1117,7 @@ export function GameScreen({
         {finishEncounter && (
           <FinishVictoryScreen
             save={save}
-            characterEmoji={character.outfit}
+            characterEmoji={getCharacterAvatarGlyph(character)}
             onComplete={(correct, ref, rewards) => {
               const stats = finishStatsRef.current ?? engineRef.current?.stats ?? {} as RunStats;
               onFinishVictory?.(correct, ref, rewards, stats);

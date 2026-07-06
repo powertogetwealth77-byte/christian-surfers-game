@@ -50,6 +50,7 @@ export const DEFAULT_SAVE: SaveData = {
   finishScriptureTier: 1,
   finishVictoryStreak: 0,
   finishLongestStreak: 0,
+  finishAttempts: 0,
   /** Phase 16.5 — Premium cosmetics purchase history and shard tracking. */
   cosmeticPurchases: [],
   cosmeticShards: {},
@@ -80,6 +81,10 @@ function hydrate(parsed: Partial<SaveData>): SaveData {
     finishScriptureTier: parsed.finishScriptureTier ?? 1,
     finishVictoryStreak: parsed.finishVictoryStreak ?? 0,
     finishLongestStreak: parsed.finishLongestStreak ?? 0,
+    // Codex review fix (PR #3, P2) — existing saves predate this field, so
+    // fall back to 0 (the dashboard's accuracy calc further falls back to
+    // finishVictories for saves that have plays but no attempts recorded).
+    finishAttempts: parsed.finishAttempts ?? 0,
     // Phase 16.5 — Cosmetics purchase tracking
     cosmeticPurchases: parsed.cosmeticPurchases ?? [],
     cosmeticShards: { ...DEFAULT_SAVE.cosmeticShards, ...(parsed.cosmeticShards ?? {}) },

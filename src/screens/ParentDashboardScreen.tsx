@@ -543,11 +543,18 @@ export function ParentDashboardScreen({
                   <MetricCard
                     icon="🎯"
                     label="Accuracy"
-                    value={
-                      (save.finishVictories ?? 0) > 0
-                        ? `${Math.round(((save.finishCorrectAnswers ?? 0) / (save.finishVictories ?? 1)) * 100)}%`
-                        : "—"
-                    }
+                    value={(() => {
+                      // Codex review fix (PR #3, P2) — finishVictories only
+                      // counts correct answers, so it understated total
+                      // attempts and could show a misleading 100% even after
+                      // failures. finishAttempts counts every answer; saves
+                      // from before this field existed fall back to
+                      // finishVictories (the best available approximation).
+                      const attempts = save.finishAttempts || save.finishVictories || 0;
+                      return attempts > 0
+                        ? `${Math.round(((save.finishCorrectAnswers ?? 0) / attempts) * 100)}%`
+                        : "—";
+                    })()}
                     accent="#34d399"
                   />
                   <MetricCard

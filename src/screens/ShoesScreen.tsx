@@ -4,6 +4,7 @@ import type { SaveData } from "../types";
 import { SHOES, RARITY_COLORS, RARITY_LABELS } from "../data/shoes";
 import { Button } from "../components/Button";
 import { sound } from "../audio/SoundEngine";
+import { purchasesAvailable } from "../services/PurchaseService";
 
 /** Stat pill for a shoe attribute. */
 function StatPill({
@@ -197,7 +198,7 @@ export function ShoesScreen({
                     </button>
                   ) : shoe.isPremium ? (
                     <button
-                      disabled={isPurchasing}
+                      disabled={isPurchasing || !purchasesAvailable}
                       onClick={async () => {
                         sound.unlock();
                         setPurchasingId(shoe.id);
@@ -206,7 +207,11 @@ export function ShoesScreen({
                       }}
                       className="block rounded-xl bg-gradient-to-b from-gold-300 to-gold-600 px-3 py-2 text-xs font-extrabold text-night shadow-lg shadow-gold-500/20 active:scale-95 disabled:opacity-50"
                     >
-                      {isPurchasing ? "…" : `💳 $${(shoe.cost / 100).toFixed(2)}`}
+                      {!purchasesAvailable
+                        ? "🚧 Soon"
+                        : isPurchasing
+                          ? "…"
+                          : `💳 $${(shoe.cost / 100).toFixed(2)}`}
                     </button>
                   ) : (
                     <button

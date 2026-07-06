@@ -340,6 +340,30 @@ export function getCharacter(id: string): CharacterDef {
   return CHARACTERS.find((c) => c.id === id) ?? CHARACTERS[0];
 }
 
+/**
+ * Codex review fix (PR #3, P2) — short avatar glyph per hero for slots that
+ * can't render a full portrait/SVG (e.g. FinishVictoryScreen's compact "YOU"
+ * badge). `CharacterDef.outfit` is a full sentence and was being passed into
+ * that slot directly, breaking the layout. This is the safe short fallback;
+ * unmapped/unknown ids fall back to a generic runner glyph.
+ */
+const CHARACTER_GLYPHS: Record<string, string> = {
+  zion: "🏃",
+  judah: "🦁",
+  grace: "✨",
+  kai: "🌊",
+  selah: "🎵",
+  mercy: "💗",
+  samuel: "📯",
+  malachi: "🔥",
+  david: "🎯",
+  esther: "👑",
+};
+
+export function getCharacterAvatarGlyph(character: CharacterDef): string {
+  return CHARACTER_GLYPHS[character.id] ?? "🏃";
+}
+
 /** Generation 1 heroes only. */
 export const GEN1_CHARACTERS = CHARACTERS.filter((c) => c.generation === 1);
 

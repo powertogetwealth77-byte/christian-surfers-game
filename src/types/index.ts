@@ -364,6 +364,13 @@ export interface SaveData {
   finishScriptureTier: number;
   finishVictoryStreak: number;
   finishLongestStreak: number;
+  /**
+   * Codex review fix (PR #3, P2) — total finish-line answers, correct or
+   * not. `finishVictories` only increments on a correct answer (it also
+   * drives scripture tier progression, so its meaning couldn't change), so
+   * accuracy needs its own denominator that counts failures too.
+   */
+  finishAttempts: number;
   /** Phase 16.5 — Premium cosmetics (shoes & boards) purchase history. */
   cosmeticPurchases: CosmeticPurchase[];
   /** Phase 16.5 — Cosmetic shards earned (5 shards = 1 free cosmetic unlock). */
