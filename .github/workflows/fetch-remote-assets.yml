@@ -1,12 +1,15 @@
 name: Fetch remote assets
 
 # Asset relay: downloads externally generated art (URLs listed in
-# scripts/pending-assets.json) and commits it to the branch this workflow is
-# dispatched on. Exists because the character art pipeline generates sprites
-# on an external service that the development sandbox cannot download from
-# directly. Manual dispatch only — never runs on push.
+# scripts/pending-assets.json) and commits it to the branch that pushed the
+# manifest. Exists because the character art pipeline generates sprites on an
+# external service that the development sandbox cannot download from directly.
+# Runs only when the manifest itself changes on a feature branch.
 on:
   workflow_dispatch:
+  push:
+    branches: ["feat/**"]
+    paths: ["scripts/pending-assets.json"]
 
 permissions:
   contents: write
