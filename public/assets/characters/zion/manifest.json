@@ -5,6 +5,7 @@
   "playable": true,
   "status": "production",
   "preview": "/assets/characters/zion.png",
+  "backSprite": "/assets/characters/zion/run_back.png",
   "runAtlas": "",
   "frameWidth": 192,
   "frameHeight": 192,

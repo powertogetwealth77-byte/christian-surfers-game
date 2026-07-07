@@ -60,10 +60,10 @@ export class Renderer {
   // instead of a cold fetch.
   private static charImageCache: Map<string, HTMLImageElement> = new Map();
 
-  /** Kicks off a (deduped) load for a character's registry preview/atlas art. */
+  /** Kicks off a (deduped) load for a character's registry gameplay/atlas art. */
   private ensureCharacterImagesLoading(characterId: string) {
     const asset = getCharacterAsset(characterId);
-    for (const src of [asset.preview, asset.runAtlas]) {
+    for (const src of [asset.backSprite, asset.runAtlas]) {
       if (src && !Renderer.charImageCache.has(src)) {
         const img = new Image();
         img.src = src;
@@ -81,16 +81,29 @@ export class Renderer {
    * Gameplay-ready premium sprite for a hero, or null while the source art
    * is missing / still loading / failed — callers must fall back to the
    * procedural body so the hero is never invisible.
+   *
+   * Uses the BACK-VIEW sprite only (chase camera sits behind the hero); the
+   * front-facing select-screen `preview` must never be drawn as the runner —
+   * it reads as the hero running the wrong way down the lane.
    */
   private heroSprite(characterId: string): HTMLCanvasElement | null {
-    const src = getCharacterAsset(characterId).preview;
+    const src = getCharacterAsset(characterId).backSprite;
     if (!src) return null;
     const img = Renderer.charImageCache.get(src);
     if (!img || !img.complete || img.naturalWidth === 0) return null;
     let scaled = Renderer.heroSpriteCache.get(src);
     if (!scaled) {
+      // Auto-crop the transparent margins first so the hero fills the sprite
+      // box and the feet sit exactly on the bottom edge (the draw anchor).
+      const full = document.createElement("canvas");
+      full.width = img.naturalWidth;
+      full.height = img.naturalHeight;
+      const fctx = full.getContext("2d");
+      if (!fctx) return null;
+      fctx.drawImage(img, 0, 0);
+      const box = this.opaqueBounds(fctx, full.width, full.height);
       const h = 280; // ~2× the on-screen sprite height, crisp on retina
-      const w = Math.max(1, Math.round((h * img.naturalWidth) / img.naturalHeight));
+      const w = Math.max(1, Math.round((h * box.w) / box.h));
       scaled = document.createElement("canvas");
       scaled.width = w;
       scaled.height = h;
@@ -98,10 +111,28 @@ export class Renderer {
       if (!sctx) return null;
       sctx.imageSmoothingEnabled = true;
       sctx.imageSmoothingQuality = "high";
-      sctx.drawImage(img, 0, 0, w, h);
+      sctx.drawImage(img, box.x, box.y, box.w, box.h, 0, 0, w, h);
       Renderer.heroSpriteCache.set(src, scaled);
     }
     return scaled;
+  }
+
+  /** Bounding box of non-transparent pixels (sampled every 2px for speed). */
+  private opaqueBounds(ctx: CanvasRenderingContext2D, w: number, h: number) {
+    const data = ctx.getImageData(0, 0, w, h).data;
+    let minX = w, minY = h, maxX = 0, maxY = 0;
+    for (let y = 0; y < h; y += 2) {
+      for (let x = 0; x < w; x += 2) {
+        if (data[(y * w + x) * 4 + 3] > 8) {
+          if (x < minX) minX = x;
+          if (x > maxX) maxX = x;
+          if (y < minY) minY = y;
+          if (y > maxY) maxY = y;
+        }
+      }
+    }
+    if (maxX <= minX || maxY <= minY) return { x: 0, y: 0, w, h }; // fully transparent guard
+    return { x: minX, y: minY, w: maxX - minX + 1, h: maxY - minY + 1 };
   }
 
   // Lane-switch lean state for the sprite path: smoothed from the engine's
@@ -2106,10 +2137,10 @@ export class Renderer {
       headTop = baseY - bounce + footY - spriteH * scaleY - 8;
       ctx.translate(p.x, baseY - bounce + footY);
       const tilt = airborne
-        ? -0.13 // heels-back launch attitude
+        ? -0.1 // heels-back launch attitude
         : slide
-          ? 0.24 // forward dive under the barrier
-          : -0.05 + Math.sin(runPhase) * 0.045; // living run-cycle rock
+          ? 0.12 // slight dive lean — the 0.7× squash carries the duck read
+          : -0.04 + Math.sin(runPhase) * 0.045; // living run-cycle rock
       ctx.rotate(tilt + lean);
       ctx.scale(scaleX, scaleY);
       ctx.drawImage(sprite, -spriteW / 2, -spriteH, spriteW, spriteH);

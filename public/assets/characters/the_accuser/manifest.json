@@ -5,6 +5,7 @@
   "playable": false,
   "status": "lore-only",
   "preview": "/assets/characters/accuser/accuser_portrait.png",
+  "backSprite": "",
   "runAtlas": "",
   "frameWidth": 0,
   "frameHeight": 0,

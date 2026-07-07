@@ -2,7 +2,24 @@
 
 How new character art gets from a design tool into the game, safely.
 
-## Status today (Phase 1)
+## Status today (Phase 2 — back-view gameplay sprites live)
+
+Every hero now has a **back-view gameplay sprite** at
+`public/assets/characters/<id>/run_back.png` (registered as `backSprite` in
+the registry and manifests). The chase camera sits behind the hero, so
+gameplay renders ONLY back-view art — the front-facing select-screen
+portrait must never be used as the runner (it reads as running the wrong
+way). The sprites were generated from each hero's canonical portrait as the
+identity reference (same outfit, hair, palette, premium 3D style),
+background-removed to transparent PNG, and delivered through
+`.github/workflows/fetch-remote-assets.yml` (see that file — the dev sandbox
+cannot download from the art CDN directly; list new URLs in
+`scripts/pending-assets.json` and push to trigger the relay).
+
+Gameplay fallback order: loaded `backSprite` → procedural hand-drawn body
+(also back-view). Menus/select keep using the front-facing `preview`.
+
+## Status before (Phase 1)
 
 Every hero already ships real, verified 3D portrait art at
 `/assets/characters/<id>.png` (referenced by `CharacterDef.image` in

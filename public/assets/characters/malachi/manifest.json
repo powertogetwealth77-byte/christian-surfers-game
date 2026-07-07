@@ -5,6 +5,7 @@
   "playable": true,
   "status": "production",
   "preview": "/assets/characters/malachi.png",
+  "backSprite": "/assets/characters/malachi/run_back.png",
   "runAtlas": "",
   "frameWidth": 192,
   "frameHeight": 192,

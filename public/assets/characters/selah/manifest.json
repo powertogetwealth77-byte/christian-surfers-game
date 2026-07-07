@@ -5,6 +5,7 @@
   "playable": true,
   "status": "production",
   "preview": "/assets/characters/selah.png",
+  "backSprite": "/assets/characters/selah/run_back.png",
   "runAtlas": "",
   "frameWidth": 192,
   "frameHeight": 192,

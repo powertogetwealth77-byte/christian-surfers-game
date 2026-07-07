@@ -26,6 +26,13 @@ export interface CharacterAssetConfig {
   playable: boolean;
   status: CharacterAssetStatus;
   preview: string;
+  /**
+   * Back-view (chase-camera) gameplay sprite — the runner seen from behind,
+   * matching the select-screen identity. Gameplay MUST use this, never the
+   * front-facing `preview`: the camera sits behind the hero, so front art
+   * reads as running the wrong way. Empty/missing → procedural fallback.
+   */
+  backSprite: string;
   runAtlas: string;
   frameWidth: number;
   frameHeight: number;
@@ -45,6 +52,7 @@ const HERO_ASSETS: CharacterAssetConfig[] = CHARACTERS.map((ch) => ({
   playable: true,
   status: "production",
   preview: ch.image ?? "",
+  backSprite: `/assets/characters/${ch.id}/run_back.png`,
   runAtlas: "",
   ...DEFAULT_ATLAS_SPEC,
   fallbackGlyph: getCharacterAvatarGlyph(ch),
@@ -59,6 +67,7 @@ const ACCUSER_ASSET: CharacterAssetConfig = {
   playable: false,
   status: "lore-only",
   preview: "/assets/characters/accuser/accuser_portrait.png",
+  backSprite: "",
   runAtlas: "",
   frameWidth: 0,
   frameHeight: 0,
@@ -81,6 +90,7 @@ const UNKNOWN_ASSET: CharacterAssetConfig = {
   playable: false,
   status: "needs-art",
   preview: "",
+  backSprite: "",
   runAtlas: "",
   ...DEFAULT_ATLAS_SPEC,
   fallbackGlyph: "🏃",

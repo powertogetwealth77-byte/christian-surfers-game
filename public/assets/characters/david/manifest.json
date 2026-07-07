@@ -5,6 +5,7 @@
   "playable": true,
   "status": "production",
   "preview": "/assets/characters/david.png",
+  "backSprite": "/assets/characters/david/run_back.png",
   "runAtlas": "",
   "frameWidth": 192,
   "frameHeight": 192,
