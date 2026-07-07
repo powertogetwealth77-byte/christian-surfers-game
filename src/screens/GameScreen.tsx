@@ -808,25 +808,50 @@ export function GameScreen({
             <span className="text-lg">🏃</span>
           </div>
 
-          {/* Active power-up timers */}
-          {(timers.length > 0 || hud.shieldCharges > 0) && (
-            <div className="pointer-events-none absolute right-[max(0.75rem,env(safe-area-inset-right))] top-1/2 flex -translate-y-1/2 flex-col items-end gap-1.5">
-              {hud.shieldCharges > 0 && (
-                <span className="rounded-full border border-gold-400/20 bg-gold-400/25 px-3 py-1 text-xs font-bold text-gold-300 shadow-lg shadow-black/20 backdrop-blur-md">
-                  {hud.shieldCharges >= 2 ? "⚔️ Armor of God ×2" : "🛡 Shield of Faith"}
-                </span>
-              )}
-              {timers.map((t) => (
-                <span
-                  key={t.label}
-                  className="rounded-full border border-white/10 bg-black/45 px-3 py-1 text-xs font-bold shadow-lg shadow-black/20 backdrop-blur-md"
-                  style={{ color: t.color }}
-                >
-                  {t.label} {t.value.toFixed(0)}s
-                </span>
-              ))}
+          {/* Shield of Faith meter + active power-up timers */}
+          <div className="pointer-events-none absolute right-[max(0.75rem,env(safe-area-inset-right))] top-1/2 flex -translate-y-1/2 flex-col items-end gap-1.5">
+            {/* Shield of Faith — always-visible meter with charge pips.
+                Golden and glowing while protection is up; dim when spent. */}
+            <div
+              className="flex items-center gap-1.5 rounded-full border px-2.5 py-1 shadow-lg shadow-black/20 backdrop-blur-md transition-all duration-300"
+              style={{
+                borderColor: hud.shieldCharges > 0 ? "rgba(245,184,46,0.6)" : "rgba(255,255,255,0.12)",
+                background: hud.shieldCharges > 0 ? "rgba(245,184,46,0.22)" : "rgba(0,0,0,0.4)",
+                boxShadow: hud.shieldCharges > 0 ? "0 0 14px rgba(245,184,46,0.45)" : undefined,
+              }}
+            >
+              <span className={`text-sm leading-none ${hud.shieldCharges > 0 ? "" : "opacity-40 grayscale"}`}>
+                {hud.shieldCharges >= 2 ? "⚔️" : "🛡"}
+              </span>
+              <span
+                className="text-[10px] font-extrabold uppercase tracking-wide"
+                style={{ color: hud.shieldCharges > 0 ? "#ffd54a" : "rgba(255,255,255,0.4)" }}
+              >
+                {hud.shieldCharges >= 2 ? "Armor of God" : "Shield of Faith"}
+              </span>
+              <span className="flex gap-1">
+                {[0, 1].map((i) => (
+                  <span
+                    key={i}
+                    className="h-2 w-2 rounded-full transition-all duration-300"
+                    style={{
+                      background: i < hud.shieldCharges ? "#ffd54a" : "rgba(255,255,255,0.16)",
+                      boxShadow: i < hud.shieldCharges ? "0 0 6px rgba(255,213,74,0.9)" : undefined,
+                    }}
+                  />
+                ))}
+              </span>
             </div>
-          )}
+            {timers.map((t) => (
+              <span
+                key={t.label}
+                className="rounded-full border border-white/10 bg-black/45 px-3 py-1 text-xs font-bold shadow-lg shadow-black/20 backdrop-blur-md"
+                style={{ color: t.color }}
+              >
+                {t.label} {t.value.toFixed(0)}s
+              </span>
+            ))}
+          </div>
 
           {/* Boost button */}
           <button

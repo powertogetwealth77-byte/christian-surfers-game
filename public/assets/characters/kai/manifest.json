@@ -1,0 +1,17 @@
+{
+  "id": "kai",
+  "displayName": "Kai",
+  "role": "hero",
+  "playable": true,
+  "status": "production",
+  "preview": "/assets/characters/kai.png",
+  "backSprite": "/assets/characters/kai/run_back.png",
+  "runAtlas": "",
+  "frameWidth": 192,
+  "frameHeight": 192,
+  "frameCount": 6,
+  "fps": 12,
+  "fallbackGlyph": "🌊",
+  "accent": "#0369a1",
+  "introLine": "Walk by faith, not by sight!"
+}

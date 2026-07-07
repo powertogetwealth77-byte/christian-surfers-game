@@ -1,0 +1,17 @@
+{
+  "id": "judah",
+  "displayName": "Judah",
+  "role": "hero",
+  "playable": true,
+  "status": "production",
+  "preview": "/assets/characters/judah.png",
+  "backSprite": "/assets/characters/judah/run_back.png",
+  "runAtlas": "",
+  "frameWidth": 192,
+  "frameHeight": 192,
+  "frameCount": 6,
+  "fps": 12,
+  "fallbackGlyph": "🦁",
+  "accent": "#f5b82e",
+  "introLine": "The Lion hath prevailed!"
+}

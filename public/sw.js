@@ -1,5 +1,7 @@
 /* Christian Surfers service worker: network-first with cache fallback. */
-const CACHE = "christian-surfers-v1";
+// Bump the cache version so clients that cached HTML under asset URLs (the
+// pre-fix fallback bug) drop that poisoned cache on next activation.
+const CACHE = "christian-surfers-v2";
 const PRECACHE = [
   ".",
   "manifest.webmanifest",
@@ -43,9 +45,16 @@ self.addEventListener("fetch", (event) => {
         return response;
       })
       .catch(() =>
-        caches
-          .match(request)
-          .then((cached) => cached ?? caches.match(".")),
+        caches.match(request).then((cached) => {
+          if (cached) return cached;
+          // Only page navigations may fall back to the cached app shell.
+          // Serving index.html for a failed JS/CSS/image request turns a
+          // missing-asset error into an HTML body — the stylesheet then
+          // fails to apply and the whole game renders as a giant unstyled
+          // text dump covering the canvas on mobile.
+          if (request.mode === "navigate") return caches.match(".");
+          return Response.error();
+        }),
       ),
   );
 });

@@ -1,6 +1,7 @@
 import type { BoardDef, CharacterDef, VenueDef } from "../types";
 import type { Collectible, GameEngine, Obstacle, PowerUpPickup } from "./engine";
 import { MAX_SPEED, SPAWN_Z } from "./constants";
+import { getCharacterAsset } from "./characterAssets";
 
 interface Particle {
   x: number;
@@ -49,6 +50,103 @@ export class Renderer {
   // revisited venue never re-fetches. Keyed by src; missing/loading entries
   // gracefully fall back to the hand-drawn procedural backdrop.
   private static bgImageCache: Map<string, HTMLImageElement> = new Map();
+  // Character asset pipeline (Phase 1) — lazily-loaded, cached preview/atlas
+  // images keyed by src, exactly mirroring bgImageCache above. Gameplay
+  // rendering does NOT draw from these yet: the hero body is still fully
+  // procedural (drawPlayer/drawSignature/etc.) below, and no verified run
+  // atlas exists. This cache just warms ahead of time so that wiring actual
+  // atlas/preview playback into drawPlayer — documented as Phase 2 in
+  // docs/CHARACTER_ART_PIPELINE.md — can start from already-loading images
+  // instead of a cold fetch.
+  private static charImageCache: Map<string, HTMLImageElement> = new Map();
+
+  /** Kicks off a (deduped) load for a character's registry gameplay/atlas art. */
+  private ensureCharacterImagesLoading(characterId: string) {
+    const asset = getCharacterAsset(characterId);
+    for (const src of [asset.backSprite, asset.runAtlas]) {
+      if (src && !Renderer.charImageCache.has(src)) {
+        const img = new Image();
+        img.src = src;
+        Renderer.charImageCache.set(src, img);
+      }
+    }
+  }
+
+  // Character asset pipeline (Phase 2) — the hero's real select-screen art,
+  // pre-scaled once into a crisp offscreen canvas sized for gameplay, so the
+  // per-frame draw is a cheap same-scale blit instead of a huge PNG downscale.
+  private static heroSpriteCache: Map<string, HTMLCanvasElement> = new Map();
+
+  /**
+   * Gameplay-ready premium sprite for a hero, or null while the source art
+   * is missing / still loading / failed — callers must fall back to the
+   * procedural body so the hero is never invisible.
+   *
+   * Uses the BACK-VIEW sprite only (chase camera sits behind the hero); the
+   * front-facing select-screen `preview` must never be drawn as the runner —
+   * it reads as the hero running the wrong way down the lane.
+   */
+  private heroSprite(characterId: string): HTMLCanvasElement | null {
+    const src = getCharacterAsset(characterId).backSprite;
+    if (!src) return null;
+    const img = Renderer.charImageCache.get(src);
+    if (!img || !img.complete || img.naturalWidth === 0) return null;
+    let scaled = Renderer.heroSpriteCache.get(src);
+    if (!scaled) {
+      // Auto-crop the transparent margins first so the hero fills the sprite
+      // box and the feet sit exactly on the bottom edge (the draw anchor).
+      const full = document.createElement("canvas");
+      full.width = img.naturalWidth;
+      full.height = img.naturalHeight;
+      const fctx = full.getContext("2d");
+      if (!fctx) return null;
+      fctx.drawImage(img, 0, 0);
+      const box = this.opaqueBounds(fctx, full.width, full.height);
+      const h = 280; // ~2× the on-screen sprite height, crisp on retina
+      const w = Math.max(1, Math.round((h * box.w) / box.h));
+      scaled = document.createElement("canvas");
+      scaled.width = w;
+      scaled.height = h;
+      const sctx = scaled.getContext("2d");
+      if (!sctx) return null;
+      sctx.imageSmoothingEnabled = true;
+      sctx.imageSmoothingQuality = "high";
+      sctx.drawImage(img, box.x, box.y, box.w, box.h, 0, 0, w, h);
+      Renderer.heroSpriteCache.set(src, scaled);
+    }
+    return scaled;
+  }
+
+  /** Bounding box of non-transparent pixels (sampled every 2px for speed). */
+  private opaqueBounds(ctx: CanvasRenderingContext2D, w: number, h: number) {
+    const data = ctx.getImageData(0, 0, w, h).data;
+    let minX = w, minY = h, maxX = 0, maxY = 0;
+    for (let y = 0; y < h; y += 2) {
+      for (let x = 0; x < w; x += 2) {
+        if (data[(y * w + x) * 4 + 3] > 8) {
+          if (x < minX) minX = x;
+          if (x > maxX) maxX = x;
+          if (y < minY) minY = y;
+          if (y > maxY) maxY = y;
+        }
+      }
+    }
+    if (maxX <= minX || maxY <= minY) return { x: 0, y: 0, w, h }; // fully transparent guard
+    return { x: minX, y: minY, w: maxX - minX + 1, h: maxY - minY + 1 };
+  }
+
+  // Lane-switch lean state for the sprite path: smoothed from the engine's
+  // fractional lane position so camera shake never jitters the hero.
+  private heroLastLaneX: number | null = null;
+  private heroLean = 0;
+
+  private updateHeroLean(laneX: number): number {
+    const dLane = this.heroLastLaneX === null ? 0 : laneX - this.heroLastLaneX;
+    this.heroLastLaneX = laneX;
+    const target = Math.max(-0.24, Math.min(0.24, dLane * 2.2));
+    this.heroLean += (target - this.heroLean) * 0.16;
+    return this.heroLean;
+  }
 
   /** Set the equipped board so its colors, scripture and trail show in play. */
   setBoard(board: BoardDef) {
@@ -1862,6 +1960,10 @@ export class Renderer {
     H: number,
     time: number,
   ) {
+    // Character asset pipeline (Phase 1) — warm the preview/atlas cache for
+    // this hero. No-op after the first frame; does not affect what's drawn.
+    this.ensureCharacterImagesLoading(ch.id);
+
     const p = this.project(engine.laneX, 0, W, H);
     const jumpPx = engine.y * H * 0.055;
     const baseY = p.y - jumpPx;
@@ -1983,16 +2085,7 @@ export class Renderer {
       }
     }
 
-    // ---- Draw character body with unique personality ----
-    // HERO SCALE: the runner is a proper hero, occupying real screen space.
-    // Feet stay planted as the body grows (anchor at local foot y ≈ 13).
-    const HERO = 2.7;
-    ctx.translate(p.x, baseY - bounce);
-    ctx.translate(0, 13 * (1 - HERO));
-    ctx.rotate(slide ? 0 : -0.06);
-    ctx.lineCap = "round";
-
-    // Squash and stretch animation
+    // Squash and stretch animation (shared by both hero render paths)
     let scaleX = 1;
     let scaleY = 1;
     if (airborne) {
@@ -2023,36 +2116,73 @@ export class Renderer {
       scaleX -= breath * 0.5;
     }
 
-    ctx.scale(scaleX * HERO, scaleY * HERO);
+    // ---- Draw character body ----
+    // Character asset pipeline Phase 2 — PREMIUM HERO SPRITE PATH.
+    // When the hero's real select-screen art is loaded, gameplay renders that
+    // exact premium art, kept alive with real motion: run bob (`bounce` in the
+    // anchor), a run-cycle rock, smoothed lane-switch lean, jump back-tilt and
+    // air stretch, and a slide duck. If the art is missing or still loading,
+    // the hand-drawn procedural body below renders instead — the hero is
+    // never invisible and never a broken image. Purely visual: hitbox, lane
+    // math, and collision are untouched.
+    const sprite = this.heroSprite(ch.id);
+    const lean = this.updateHeroLean(engine.laneX);
+    let headTop = baseY - 96; // procedural body's halo anchor (default)
 
-    // Call character-specific renderer
-    switch (ch.id) {
-      case "zion":
-        this.drawZion(ctx, ch, time, runPhase, airborne, slide);
-        break;
-      case "grace":
-        this.drawGrace(ctx, ch, time, runPhase, airborne, slide);
-        break;
-      case "judah":
-        this.drawJudah(ctx, ch, time, runPhase, airborne, slide);
-        break;
-      case "kai":
-        this.drawKai(ctx, ch, time, runPhase, airborne, slide);
-        break;
-      case "mercy":
-        this.drawMercy(ctx, ch, time, runPhase, airborne, slide);
-        break;
-      case "caleb":
-        this.drawCaleb(ctx, ch, time, runPhase, airborne, slide);
-        break;
-      case "selah":
-        this.drawSelah(ctx, ch, time, runPhase, airborne, slide);
-        break;
-      case "malachi":
-        this.drawMalachi(ctx, ch, time, runPhase, airborne, slide);
-        break;
-      default:
-        this.drawZion(ctx, ch, time, runPhase, airborne, slide);
+    if (sprite) {
+      const spriteH = 138; // on-screen hero height
+      const spriteW = (spriteH * sprite.width) / sprite.height;
+      const footY = 16; // feet meet the hoverboard just below the anchor
+      // Halo rides the sprite's actual head (ducks with the slide squash).
+      headTop = baseY - bounce + footY - spriteH * scaleY - 8;
+      ctx.translate(p.x, baseY - bounce + footY);
+      const tilt = airborne
+        ? -0.1 // heels-back launch attitude
+        : slide
+          ? 0.12 // slight dive lean — the 0.7× squash carries the duck read
+          : -0.04 + Math.sin(runPhase) * 0.045; // living run-cycle rock
+      ctx.rotate(tilt + lean);
+      ctx.scale(scaleX, scaleY);
+      ctx.drawImage(sprite, -spriteW / 2, -spriteH, spriteW, spriteH);
+    } else {
+      // HERO SCALE: the runner is a proper hero, occupying real screen space.
+      // Feet stay planted as the body grows (anchor at local foot y ≈ 13).
+      const HERO = 2.7;
+      ctx.translate(p.x, baseY - bounce);
+      ctx.translate(0, 13 * (1 - HERO));
+      ctx.rotate(slide ? 0 : -0.06);
+      ctx.lineCap = "round";
+      ctx.scale(scaleX * HERO, scaleY * HERO);
+
+      // Call character-specific renderer
+      switch (ch.id) {
+        case "zion":
+          this.drawZion(ctx, ch, time, runPhase, airborne, slide);
+          break;
+        case "grace":
+          this.drawGrace(ctx, ch, time, runPhase, airborne, slide);
+          break;
+        case "judah":
+          this.drawJudah(ctx, ch, time, runPhase, airborne, slide);
+          break;
+        case "kai":
+          this.drawKai(ctx, ch, time, runPhase, airborne, slide);
+          break;
+        case "mercy":
+          this.drawMercy(ctx, ch, time, runPhase, airborne, slide);
+          break;
+        case "caleb":
+          this.drawCaleb(ctx, ch, time, runPhase, airborne, slide);
+          break;
+        case "selah":
+          this.drawSelah(ctx, ch, time, runPhase, airborne, slide);
+          break;
+        case "malachi":
+          this.drawMalachi(ctx, ch, time, runPhase, airborne, slide);
+          break;
+        default:
+          this.drawZion(ctx, ch, time, runPhase, airborne, slide);
+      }
     }
 
     ctx.restore();
@@ -2060,7 +2190,6 @@ export class Renderer {
 
     // ---- Holy light above the head: a reverent halo ring, a soft glow,
     // and gentle light particles rising upward. ----
-    const headTop = baseY - 96;
     // Soft glow behind the halo.
     const hg = ctx.createRadialGradient(p.x, headTop, 2, p.x, headTop, 34);
     hg.addColorStop(0, `rgba(255,252,235,${0.6 + 0.15 * Math.sin(time * 3)})`);
@@ -2119,12 +2248,12 @@ export class Renderer {
       ctx.stroke();
     }
 
-    // Scripture Boost halo.
+    // Scripture Boost halo (rides just above the head in both render paths).
     if (engine.boostTimer > 0) {
       ctx.strokeStyle = `rgba(167,139,250,${0.5 + 0.3 * Math.sin(time * 8)})`;
       ctx.lineWidth = 3;
       ctx.beginPath();
-      ctx.ellipse(p.x, baseY - 112, 16, 5, 0, 0, Math.PI * 2);
+      ctx.ellipse(p.x, headTop - 16, 16, 5, 0, 0, Math.PI * 2);
       ctx.stroke();
     }
 

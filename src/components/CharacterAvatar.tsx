@@ -1,6 +1,7 @@
 import { useState } from "react";
 import { motion } from "framer-motion";
 import type { CharacterDef } from "../types";
+import { getCharacterAsset } from "../game/characterAssets";
 
 // Phase 16.3 §7 — ART PLACEHOLDER SAFETY
 // This SVG avatar is the franchise's current, fully-functional hero rendering.
@@ -189,7 +190,11 @@ export function CharacterAvatar(props: AvatarProps) {
     ch,
     className = "h-28 w-auto drop-shadow-lg",
   } = props;
-  const src = ch.image ?? ch.portrait ?? ch.cardArt;
+  // Asset-registry preview takes priority (Phase 1 of the character art
+  // pipeline — see docs/CHARACTER_ART_PIPELINE.md); falls back to the legacy
+  // per-field art, then to the guaranteed hand-drawn SVG below.
+  const registryPreview = getCharacterAsset(ch.id).preview;
+  const src = registryPreview || ch.image || ch.portrait || ch.cardArt;
   const [failed, setFailed] = useState(false);
 
   if (src && !failed) {
