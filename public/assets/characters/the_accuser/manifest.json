@@ -1,0 +1,16 @@
+{
+  "id": "the_accuser",
+  "displayName": "The Accuser",
+  "role": "enemy",
+  "playable": false,
+  "status": "lore-only",
+  "preview": "/assets/characters/accuser/accuser_portrait.png",
+  "runAtlas": "",
+  "frameWidth": 0,
+  "frameHeight": 0,
+  "frameCount": 0,
+  "fps": 0,
+  "fallbackGlyph": "⚠️",
+  "accent": "#1c1c28",
+  "introLine": ""
+}

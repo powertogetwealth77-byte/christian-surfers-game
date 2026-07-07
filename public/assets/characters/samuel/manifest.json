@@ -1,0 +1,16 @@
+{
+  "id": "samuel",
+  "displayName": "Samuel",
+  "role": "hero",
+  "playable": true,
+  "status": "production",
+  "preview": "/assets/characters/samuel.png",
+  "runAtlas": "",
+  "frameWidth": 192,
+  "frameHeight": 192,
+  "frameCount": 6,
+  "fps": 12,
+  "fallbackGlyph": "📯",
+  "accent": "#9ca3af",
+  "introLine": "Speak, Lord; thy servant heareth."
+}

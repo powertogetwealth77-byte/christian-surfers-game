@@ -1,0 +1,16 @@
+{
+  "id": "grace",
+  "displayName": "Grace",
+  "role": "hero",
+  "playable": true,
+  "status": "production",
+  "preview": "/assets/characters/grace.png",
+  "runAtlas": "",
+  "frameWidth": 192,
+  "frameHeight": 192,
+  "frameCount": 6,
+  "fps": 12,
+  "fallbackGlyph": "✨",
+  "accent": "#7c3aed",
+  "introLine": "Grace always leads you forward!"
+}

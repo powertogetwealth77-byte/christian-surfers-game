@@ -1,0 +1,16 @@
+{
+  "id": "malachi",
+  "displayName": "Malachi",
+  "role": "hero",
+  "playable": true,
+  "status": "production",
+  "preview": "/assets/characters/malachi.png",
+  "runAtlas": "",
+  "frameWidth": 192,
+  "frameHeight": 192,
+  "frameCount": 6,
+  "fps": 12,
+  "fallbackGlyph": "🔥",
+  "accent": "#dc2626",
+  "introLine": "Arise and shine!"
+}

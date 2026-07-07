@@ -1,6 +1,7 @@
 import type { BoardDef, CharacterDef, VenueDef } from "../types";
 import type { Collectible, GameEngine, Obstacle, PowerUpPickup } from "./engine";
 import { MAX_SPEED, SPAWN_Z } from "./constants";
+import { getCharacterAsset } from "./characterAssets";
 
 interface Particle {
   x: number;
@@ -49,6 +50,27 @@ export class Renderer {
   // revisited venue never re-fetches. Keyed by src; missing/loading entries
   // gracefully fall back to the hand-drawn procedural backdrop.
   private static bgImageCache: Map<string, HTMLImageElement> = new Map();
+  // Character asset pipeline (Phase 1) — lazily-loaded, cached preview/atlas
+  // images keyed by src, exactly mirroring bgImageCache above. Gameplay
+  // rendering does NOT draw from these yet: the hero body is still fully
+  // procedural (drawPlayer/drawSignature/etc.) below, and no verified run
+  // atlas exists. This cache just warms ahead of time so that wiring actual
+  // atlas/preview playback into drawPlayer — documented as Phase 2 in
+  // docs/CHARACTER_ART_PIPELINE.md — can start from already-loading images
+  // instead of a cold fetch.
+  private static charImageCache: Map<string, HTMLImageElement> = new Map();
+
+  /** Kicks off a (deduped) load for a character's registry preview/atlas art. */
+  private ensureCharacterImagesLoading(characterId: string) {
+    const asset = getCharacterAsset(characterId);
+    for (const src of [asset.preview, asset.runAtlas]) {
+      if (src && !Renderer.charImageCache.has(src)) {
+        const img = new Image();
+        img.src = src;
+        Renderer.charImageCache.set(src, img);
+      }
+    }
+  }
 
   /** Set the equipped board so its colors, scripture and trail show in play. */
   setBoard(board: BoardDef) {
@@ -1862,6 +1884,10 @@ export class Renderer {
     H: number,
     time: number,
   ) {
+    // Character asset pipeline (Phase 1) — warm the preview/atlas cache for
+    // this hero. No-op after the first frame; does not affect what's drawn.
+    this.ensureCharacterImagesLoading(ch.id);
+
     const p = this.project(engine.laneX, 0, W, H);
     const jumpPx = engine.y * H * 0.055;
     const baseY = p.y - jumpPx;

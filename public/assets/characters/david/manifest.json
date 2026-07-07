@@ -1,0 +1,16 @@
+{
+  "id": "david",
+  "displayName": "David",
+  "role": "hero",
+  "playable": true,
+  "status": "production",
+  "preview": "/assets/characters/david.png",
+  "runAtlas": "",
+  "frameWidth": 192,
+  "frameHeight": 192,
+  "frameCount": 6,
+  "fps": 12,
+  "fallbackGlyph": "🎯",
+  "accent": "#4ade80",
+  "introLine": "I come in the name of the Lord!"
+}
