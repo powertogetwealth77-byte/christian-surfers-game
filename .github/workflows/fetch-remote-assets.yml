@@ -1,0 +1,40 @@
+name: Fetch remote assets
+
+# Asset relay: downloads externally generated art (URLs listed in
+# scripts/pending-assets.json) and commits it to the branch this workflow is
+# dispatched on. Exists because the character art pipeline generates sprites
+# on an external service that the development sandbox cannot download from
+# directly. Manual dispatch only — never runs on push.
+on:
+  workflow_dispatch:
+
+permissions:
+  contents: write
+
+jobs:
+  fetch:
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/checkout@v4
+      - name: Download pending assets
+        run: |
+          set -euo pipefail
+          test -f scripts/pending-assets.json || { echo "no manifest"; exit 0; }
+          python3 - <<'PY'
+          import json, os, urllib.request
+          items = json.load(open("scripts/pending-assets.json"))
+          for path, url in items.items():
+              os.makedirs(os.path.dirname(path), exist_ok=True)
+              print("fetching", path)
+              urllib.request.urlretrieve(url, path)
+              assert os.path.getsize(path) > 1000, f"suspiciously small: {path}"
+          PY
+      - name: Commit assets
+        run: |
+          set -euo pipefail
+          git config user.name "asset-relay[bot]"
+          git config user.email "asset-relay@users.noreply.github.com"
+          git add -A
+          git diff --cached --quiet && { echo "nothing to commit"; exit 0; }
+          git commit -m "chore(assets): fetch generated character back-view sprites"
+          git push
