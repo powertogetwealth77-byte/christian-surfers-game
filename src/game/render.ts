@@ -50,6 +50,25 @@ export class Renderer {
   // gracefully fall back to the hand-drawn procedural backdrop.
   private static bgImageCache: Map<string, HTMLImageElement> = new Map();
 
+  // Phase 4G: Character sprite cache — loads back-view run sprites from public assets
+  private charSpriteCache: Map<string, { img: HTMLImageElement; loaded: boolean; failed: boolean }> = new Map();
+
+  /** Load a character's back-view run sprite if available. */
+  private loadCharacterSprite(characterId: string): void {
+    if (this.charSpriteCache.has(characterId)) return;
+    this.charSpriteCache.set(characterId, { img: null as any, loaded: false, failed: false });
+    const img = new Image();
+    img.onload = () => this.charSpriteCache.set(characterId, { img, loaded: true, failed: false });
+    img.onerror = () => this.charSpriteCache.set(characterId, { img: null as any, loaded: false, failed: true });
+    img.src = `/assets/characters/${characterId}/run_back.png`;
+  }
+
+  /** Get loaded character sprite or null if not ready/missing. */
+  private getCharacterSprite(characterId: string): HTMLImageElement | null {
+    const cached = this.charSpriteCache.get(characterId);
+    return cached?.loaded ? cached.img : null;
+  }
+
   /** Set the equipped board so its colors, scripture and trail show in play. */
   setBoard(board: BoardDef) {
     this.board = board;
@@ -1871,6 +1890,79 @@ export class Renderer {
     const bounce = airborne || slide ? 0 : Math.abs(Math.sin(runPhase)) * 3;
 
     ctx.save();
+
+    // Phase 4G: Try sprite-first, fall back to procedural. The Accuser (satan) never uses sprites.
+    if (ch.id !== "satan") {
+      this.loadCharacterSprite(ch.id);
+      const sprite = this.getCharacterSprite(ch.id);
+
+      if (sprite && sprite.complete && sprite.naturalWidth > 0) {
+        const spriteHeight = 110;
+        const spriteWidth = spriteHeight;
+        const dx = p.x - spriteWidth / 2;
+        const dy = baseY - spriteHeight;
+        ctx.globalAlpha = 0.95;
+        ctx.drawImage(sprite, dx, dy, spriteWidth, spriteHeight);
+
+        // Draw signature effects and power-up effects for sprite render
+        this.drawSignature(ctx, ch, p.x, baseY, time);
+        ctx.save();
+
+        ctx.fillStyle = `rgba(0,0,0,${0.4 - Math.min(0.3, engine.y * 0.08)})`;
+        ctx.beginPath();
+        ctx.ellipse(p.x, p.y + 10, 64 - engine.y * 5, 16, 0, 0, Math.PI * 2);
+        ctx.fill();
+
+        this.drawHoverboard(ctx, p.x, baseY + 22, ch, time, engine);
+
+        if (engine.sprintTimer > 0) {
+          for (let f = 0; f < 7; f++) {
+            const fy = baseY - 30 + f * 11 + Math.sin(time * 18 + f * 3) * 4;
+            ctx.fillStyle = `rgba(255,${200 - f * 18},60,${0.42 - f * 0.05})`;
+            ctx.beginPath();
+            ctx.arc(p.x + Math.sin(time * 16 + f) * 6, fy + 30, 15 - f * 1.5, 0, Math.PI * 2);
+            ctx.fill();
+          }
+        }
+
+        if (engine.surgeTimer > 0) {
+          const sg = ctx.createRadialGradient(p.x, baseY - 52, 8, p.x, baseY - 52, 90);
+          sg.addColorStop(0, "rgba(52,211,153,0.35)");
+          sg.addColorStop(0.6, "rgba(255,214,90,0.18)");
+          sg.addColorStop(1, "rgba(52,211,153,0)");
+          ctx.fillStyle = sg;
+          ctx.beginPath();
+          ctx.arc(p.x, baseY - 52, 92, 0, Math.PI * 2);
+          ctx.fill();
+          ctx.strokeStyle = `rgba(52,211,153,${0.5 + 0.3 * Math.sin(time * 10)})`;
+          ctx.lineWidth = 2.5;
+          for (let r = 0; r < 6; r++) {
+            const a = time * 2.4 + (r / 6) * Math.PI * 2;
+            ctx.beginPath();
+            ctx.moveTo(p.x + Math.cos(a) * 50, baseY - 52 + Math.sin(a) * 50);
+            ctx.lineTo(p.x + Math.cos(a) * 78, baseY - 52 + Math.sin(a) * 78);
+            ctx.stroke();
+          }
+        }
+
+        if (engine.wingsTimer > 0) {
+          const flap = Math.sin(time * 9) * 0.25;
+          ctx.fillStyle = "rgba(255,250,235,0.85)";
+          for (const dir of [-1, 1]) {
+            ctx.save();
+            ctx.translate(p.x, baseY - 62);
+            ctx.rotate(dir * (0.5 + flap));
+            ctx.beginPath();
+            ctx.ellipse(dir * 34, 0, 36, 13, dir * 0.4, 0, Math.PI * 2);
+            ctx.fill();
+            ctx.restore();
+          }
+        }
+
+        ctx.restore();
+        return; // Skip procedural render when sprite succeeds
+      }
+    }
 
     // ---- Holy light: a bright golden-white aura marks the child of God as
     // radiant and set apart — the visual opposite of the dark Accuser. ----
