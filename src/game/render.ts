@@ -84,6 +84,11 @@ export class Renderer {
     }
   }
 
+  /** Preload character sprite at game start. */
+  setCharacter(character: CharacterDef) {
+    this.loadCharacterSprite(character.id);
+  }
+
   /** Loaded (paint-ready) backdrop image for the active venue, or null. */
   private activeBgImage(): HTMLImageElement | null {
     const src = this.venue?.bgImage;

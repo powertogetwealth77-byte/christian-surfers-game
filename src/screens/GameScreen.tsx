@@ -207,6 +207,7 @@ export function GameScreen({
     const renderer = rendererRef.current;
     renderer.setBoard(getBoard(save.equippedBoard));
     renderer.setVenue(getVenue(save.selectedVenue));
+    renderer.setCharacter(character);
 
     sound.unlock();
     sound.play("startRun");
