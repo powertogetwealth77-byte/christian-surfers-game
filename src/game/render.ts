@@ -140,6 +140,11 @@ export class Renderer {
   private heroLastLaneX: number | null = null;
   private heroLean = 0;
 
+  // Landing-weight state: tracks the airborne→grounded transition so a
+  // touchdown reads as an impact (squash + dust) instead of just stopping.
+  private heroWasAirborne = false;
+  private heroLandAt = -10;
+
   private updateHeroLean(laneX: number): number {
     const dLane = this.heroLastLaneX === null ? 0 : laneX - this.heroLastLaneX;
     this.heroLastLaneX = laneX;
@@ -1972,6 +1977,12 @@ export class Renderer {
     const runPhase = engine.stats.distance * 1.9;
     const bounce = airborne || slide ? 0 : Math.abs(Math.sin(runPhase)) * 3;
 
+    // Touchdown impact: catch the airborne→grounded transition once per jump.
+    if (this.heroWasAirborne && !airborne) this.heroLandAt = time;
+    this.heroWasAirborne = airborne;
+    const sinceLand = time - this.heroLandAt;
+    const landingSquash = sinceLand >= 0 && sinceLand < 0.16 ? 1 - sinceLand / 0.16 : 0;
+
     ctx.save();
 
     // ---- Holy light: a bright golden-white aura marks the child of God as
@@ -2013,6 +2024,56 @@ export class Renderer {
     ctx.beginPath();
     ctx.ellipse(p.x, p.y + 10, 64 - engine.y * 5, 16, 0, 0, Math.PI * 2);
     ctx.fill();
+    // Tighter, darker contact core directly under the feet — reads as real
+    // weight on the board instead of a soft floating blob, without changing
+    // the ambient shadow's footprint.
+    ctx.fillStyle = `rgba(0,0,0,${0.32 - Math.min(0.24, engine.y * 0.08)})`;
+    ctx.beginPath();
+    ctx.ellipse(p.x, p.y + 9, 30 - engine.y * 3, 7, 0, 0, Math.PI * 2);
+    ctx.fill();
+
+    // Slide friction streak — a low dust trail kicked up behind the duck,
+    // reading as speed and ground contact rather than a floaty crouch.
+    if (slide) {
+      for (let i = 0; i < 4; i++) {
+        const a = 0.22 * (1 - i / 4);
+        ctx.fillStyle = `rgba(230,220,200,${a})`;
+        ctx.beginPath();
+        ctx.ellipse(p.x, p.y + 9 + i * 2, 26 - i * 3, 4, 0, 0, Math.PI * 2);
+        ctx.fill();
+      }
+    }
+
+    // Footfall dust — a quick puff at each foot-strike beat (twice per stride,
+    // where bounce bottoms out) so the run reads as planted, not floating.
+    if (!airborne && !slide) {
+      const strike = Math.max(0, Math.cos(runPhase * 2));
+      const kick = Math.pow(strike, 10);
+      if (kick > 0.02) {
+        const side = Math.sin(runPhase) > 0 ? 1 : -1;
+        for (let d = 0; d < 3; d++) {
+          ctx.fillStyle = `rgba(255,250,235,${kick * (0.26 - d * 0.07)})`;
+          ctx.beginPath();
+          ctx.ellipse(p.x + side * (9 + d * 4), p.y + 9, 7 - d, 3, 0, 0, Math.PI * 2);
+          ctx.fill();
+        }
+      }
+    }
+    // Landing dust burst — a brief symmetric ring at touchdown.
+    if (landingSquash > 0) {
+      ctx.fillStyle = `rgba(255,250,235,${landingSquash * 0.3})`;
+      for (const side of [-1, 1]) {
+        ctx.beginPath();
+        ctx.ellipse(
+          p.x + side * (12 + (1 - landingSquash) * 16),
+          p.y + 8,
+          8 * (1 - landingSquash * 0.3),
+          3,
+          0, 0, Math.PI * 2,
+        );
+        ctx.fill();
+      }
+    }
 
     // Draw the premium scripture hoverboard beneath the hero's feet.
     this.drawHoverboard(ctx, p.x, baseY + 22, ch, time, engine);
@@ -2114,6 +2175,10 @@ export class Renderer {
       const breath = Math.sin(time * 1.6) * 0.02;
       scaleY += breath;
       scaleX -= breath * 0.5;
+      // Touchdown impact — a fast compress-and-recover so a jump lands with
+      // real weight instead of just resuming the run cycle mid-air.
+      scaleY -= landingSquash * 0.22;
+      scaleX += landingSquash * 0.16;
     }
 
     // ---- Draw character body ----
@@ -2140,7 +2205,7 @@ export class Renderer {
         ? -0.1 // heels-back launch attitude
         : slide
           ? 0.12 // slight dive lean — the 0.7× squash carries the duck read
-          : -0.04 + Math.sin(runPhase) * 0.045; // living run-cycle rock
+          : -0.04 + Math.sin(runPhase) * 0.045 + landingSquash * 0.07; // living run-cycle rock + touchdown dip
       ctx.rotate(tilt + lean);
       ctx.scale(scaleX, scaleY);
       ctx.drawImage(sprite, -spriteW / 2, -spriteH, spriteW, spriteH);
@@ -4002,9 +4067,15 @@ export class Renderer {
     const rise = Math.max(0.15, Math.min(1, prox)); // always at least a looming hint
     // He stays a smaller, distant figure UP the track until he genuinely
     // closes in (quadratic ramp), so he never merges with the bright hero.
-    const S = 22 + Math.pow(rise, 1.5) * 80; // far: ~22px unit; close: ~102px
+    // Clamped well below the old max (was ~102px unit, tall enough to fill a
+    // phone screen once horns/aura/limb reach were added on top) so he reads
+    // as a contained chase threat, never a screen-covering blob.
+    const S = 18 + Math.pow(rise, 1.5) * 46; // far: ~18px unit; close: ~64px
     const cx = W / 2 + Math.sin(time * 1.05) * W * 0.05;
-    const footY = H * 0.42 + rise * rise * (H * 0.44); // far: up-track; close: at hero
+    // Capped reach: even at max danger he stays up-track behind the hero
+    // instead of closing all the way to the foreground, so lanes/coins in
+    // front of him stay readable.
+    const footY = H * 0.4 + rise * rise * (H * 0.28); // far: up-track; close: still behind hero
 
     const runC = time * (5 + rise * 5); // strides quicken as he closes
     const legSwing = Math.sin(runC);
@@ -4018,13 +4089,13 @@ export class Renderer {
 
     ctx.save();
 
-    // Hellish aura behind the figure.
-    const aura = ctx.createRadialGradient(cx, midY, S * 0.2, cx, midY, S * 3.2);
-    aura.addColorStop(0, `rgba(190,20,30,${0.2 * rise})`);
-    aura.addColorStop(0.5, `rgba(120,10,40,${0.11 * rise})`);
+    // Hellish aura behind the figure — sized to frame him, not blanket the lane.
+    const aura = ctx.createRadialGradient(cx, midY, S * 0.2, cx, midY, S * 2.0);
+    aura.addColorStop(0, `rgba(190,20,30,${0.18 * rise})`);
+    aura.addColorStop(0.5, `rgba(120,10,40,${0.1 * rise})`);
     aura.addColorStop(1, "rgba(80,0,30,0)");
     ctx.fillStyle = aura;
-    ctx.fillRect(cx - S * 3.2, midY - S * 3.2, S * 6.4, S * 6.4);
+    ctx.fillRect(cx - S * 2.0, midY - S * 2.0, S * 4.0, S * 4.0);
 
     // Ground shadow at his feet — a soft radial pool so the silhouette feels
     // grounded without a hard edge.
@@ -4068,47 +4139,64 @@ export class Renderer {
       ctx.fill();
     }
 
-    // Tapered two-segment limb helper.
+    // Tapered two-segment limb — a filled, perpendicular-offset quad per
+    // segment (thigh/shin, upper arm/forearm) plus filled joint circles to
+    // hide the seams, so limbs read as smooth organic shapes instead of the
+    // old thick-stroked stick figure.
+    const limbQuad = (
+      ax: number, ay: number, bx: number, by: number, w0: number, w1: number,
+    ) => {
+      const dx = bx - ax, dy = by - ay;
+      const len = Math.hypot(dx, dy) || 1;
+      const nx = -dy / len, ny = dx / len;
+      ctx.beginPath();
+      ctx.moveTo(ax + nx * w0, ay + ny * w0);
+      ctx.lineTo(bx + nx * w1, by + ny * w1);
+      ctx.lineTo(bx - nx * w1, by - ny * w1);
+      ctx.lineTo(ax - nx * w0, ay - ny * w0);
+      ctx.closePath();
+      ctx.fill();
+    };
     const limb = (
       x0: number, y0: number, x1: number, y1: number,
-      x2: number, y2: number, w: number,
+      x2: number, y2: number, w0: number, w1: number, w2: number,
     ) => {
-      ctx.strokeStyle = black;
-      ctx.lineWidth = w;
-      ctx.lineCap = "round";
-      ctx.lineJoin = "round";
-      ctx.beginPath();
-      ctx.moveTo(x0, y0);
-      ctx.lineTo(x1, y1);
-      ctx.lineTo(x2, y2);
-      ctx.stroke();
+      ctx.fillStyle = black;
+      limbQuad(x0, y0, x1, y1, w0, w1);
+      limbQuad(x1, y1, x2, y2, w1, w2);
+      for (const [jx, jy, jw] of [[x0, y0, w0], [x1, y1, w1], [x2, y2, w2]] as const) {
+        ctx.beginPath();
+        ctx.arc(jx, jy, jw, 0, Math.PI * 2);
+        ctx.fill();
+      }
     };
 
-    // Legs — full run cycle.
+    // Legs — full run cycle. Shorter, slimmer, tapered stride (was a flat
+    // thick stroke reaching further out — the "oversized stickman legs" look).
     for (const d of [-1, 1]) {
       const p = d > 0 ? legSwing : -legSwing;
       const hipX = cx + d * S * 0.18;
-      const kneeX = hipX + p * S * 0.45;
-      const kneeY = hipY + S * 0.72;
-      const lift = Math.max(0, -p) * S * 0.32;
-      const footX = kneeX + p * S * 0.32;
+      const kneeX = hipX + p * S * 0.36;
+      const kneeY = hipY + S * 0.7;
+      const lift = Math.max(0, -p) * S * 0.28;
+      const footX = kneeX + p * S * 0.24;
       const fY = footY - lift;
-      limb(hipX, hipY, kneeX, kneeY, footX, fY, S * 0.42);
-      // Clawed foot.
+      limb(hipX, hipY, kneeX, kneeY, footX, fY, S * 0.26, S * 0.19, S * 0.13);
+      // Clawed foot — a small accent, not a limb-width blob.
       ctx.fillStyle = black;
       ctx.beginPath();
-      ctx.ellipse(footX + p * S * 0.12, fY, S * 0.22, S * 0.12, p * 0.3, 0, Math.PI * 2);
+      ctx.ellipse(footX + p * S * 0.1, fY, S * 0.16, S * 0.09, p * 0.3, 0, Math.PI * 2);
       ctx.fill();
     }
 
-    // Torso silhouette.
+    // Torso silhouette — rounded shoulders, cleaner taper to the hips.
     ctx.fillStyle = black;
     ctx.beginPath();
     ctx.moveTo(cx - S * 0.55, shoulderY + S * 0.1);
     ctx.quadraticCurveTo(cx - S * 0.72, midY, cx - S * 0.4, hipY + S * 0.1);
     ctx.quadraticCurveTo(cx, hipY + S * 0.3, cx + S * 0.4, hipY + S * 0.1);
     ctx.quadraticCurveTo(cx + S * 0.72, midY, cx + S * 0.55, shoulderY + S * 0.1);
-    ctx.quadraticCurveTo(cx, shoulderY - S * 0.28, cx - S * 0.55, shoulderY + S * 0.1);
+    ctx.quadraticCurveTo(cx, shoulderY - S * 0.2, cx - S * 0.55, shoulderY + S * 0.1);
     ctx.closePath();
     ctx.fill();
 
@@ -4126,24 +4214,25 @@ export class Renderer {
     }
 
     // Arms — swing opposite the legs; the right arm rears back to hurl scrolls.
+    // Slimmer taper than the legs, matching a lean, contained frame.
     const throwActive = this.satanThrow > 1.15;
     for (const d of [-1, 1]) {
       const p = d > 0 ? -legSwing : legSwing;
       const shX = cx + d * S * 0.5;
-      let elbowX = shX + d * S * 0.3 + p * S * 0.2;
-      let elbowY = shoulderY + S * 0.5;
-      let handX = elbowX + d * S * 0.2 + p * S * 0.3;
-      let handY = elbowY + S * 0.45;
+      let elbowX = shX + d * S * 0.24 + p * S * 0.16;
+      let elbowY = shoulderY + S * 0.44;
+      let handX = elbowX + d * S * 0.16 + p * S * 0.24;
+      let handY = elbowY + S * 0.4;
       if (d > 0 && throwActive) {
-        elbowX = shX + S * 0.3;
+        elbowX = shX + S * 0.26;
         elbowY = shoulderY - S * 0.1;
-        handX = shX + S * 0.55;
+        handX = shX + S * 0.5;
         handY = shoulderY - S * 0.6;
       }
-      limb(shX, shoulderY + S * 0.05, elbowX, elbowY, handX, handY, S * 0.34);
+      limb(shX, shoulderY + S * 0.05, elbowX, elbowY, handX, handY, S * 0.2, S * 0.15, S * 0.1);
       ctx.fillStyle = black;
       ctx.beginPath();
-      ctx.arc(handX, handY, S * 0.14, 0, Math.PI * 2);
+      ctx.arc(handX, handY, S * 0.11, 0, Math.PI * 2);
       ctx.fill();
     }
 

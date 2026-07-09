@@ -185,8 +185,8 @@ class SoundEngine {
     const speakMain = () => {
       const mainText = `${paced} ${ref}.`;
       const utt = new SpeechSynthesisUtterance(mainText);
-      utt.rate = 0.82;
-      utt.pitch = 1.0;
+      utt.rate = 0.85;
+      utt.pitch = 0.96;
       utt.volume = this.voiceVolume;
       try {
         if (!this.cachedVoice) this.cachedVoice = this.selectBestVoice(this.voiceGender);
@@ -209,8 +209,8 @@ class SoundEngine {
 
     if (intro) {
       const introUtt = new SpeechSynthesisUtterance(intro);
-      introUtt.rate = 0.82;
-      introUtt.pitch = 1.0;
+      introUtt.rate = 0.88;
+      introUtt.pitch = 0.97;
       introUtt.volume = this.voiceVolume;
       try {
         if (!this.cachedVoice) this.cachedVoice = this.selectBestVoice(this.voiceGender);
@@ -285,18 +285,26 @@ class SoundEngine {
     // The voiceschanged listener in unlock() will invalidate cachedVoice when ready.
     if (!voices.length) return null;
 
-    const maleNames = /daniel|david|alex|thomas|james|george|oliver|fred|ralph|bruce|junior|male/i;
-    const femaleNames = /samantha|karen|victoria|ava|siri|allison|susan|zoe|moana|tessa|nicky|female|fiona/i;
+    const maleNames = /daniel|david|alex|thomas|james|george|oliver|fred|ralph|bruce|junior|guy|ryan|male/i;
+    const femaleNames = /samantha|karen|victoria|ava|siri|allison|susan|zoe|moana|tessa|nicky|aria|jenny|sonia|libby|female|fiona/i;
+    // Mac/legacy "novelty" voices — cartoonish, never appropriate for scripture.
+    const novelty = /albert|bad news|bahh|bells|boing|bubbles|cellos|deranged|good news|hysterical|jester|organ|pipe organ|trinoids|whisper|wobble|zarvox|eloquence|espeak/i;
 
     const scored = voices.map((v) => {
       let score = 0;
       const name = v.name.toLowerCase();
       const lang = v.lang.toLowerCase();
 
-      // Naturalness bonus
+      // Naturalness bonus — cloud/neural engines read far more human than
+      // on-device compact voices, which is the gap that makes TTS feel robotic.
       if (/natural|neural|enhanced|premium/.test(name)) score += 20;
-      // Penalize compact/low-quality voices
+      // The Web Speech API exposes localService: cloud-backed voices are
+      // almost always the higher-quality engine on that platform.
+      if (v.localService === false) score += 15;
+      else score -= 4;
+      // Penalize compact/low-quality/novelty voices
       if (/compact/.test(name)) score -= 15;
+      if (novelty.test(name)) score -= 100;
 
       // English locale preference
       if (lang.startsWith("en-us")) score += 10;
@@ -316,6 +324,8 @@ class SoundEngine {
       // Well-known good voices
       if (/google us english/i.test(v.name)) score += 12;
       if (/google uk english/i.test(v.name)) score += 8;
+      // Microsoft Edge/Windows neural voices (e.g. "Microsoft Guy Online (Natural)")
+      if (/online \(natural\)/i.test(v.name)) score += 18;
 
       return { voice: v, score };
     });
@@ -398,8 +408,8 @@ class SoundEngine {
             : `${text} ${ref}.`;
 
     const utterance = new SpeechSynthesisUtterance(spoken);
-    utterance.rate = 0.82;
-    utterance.pitch = 1.0;
+    utterance.rate = 0.85;
+    utterance.pitch = 0.96;
     utterance.volume = this.voiceVolume;
 
     // Select and cache the best available voice for the current gender preference.
@@ -478,6 +488,75 @@ class SoundEngine {
     filter.frequency.value = 1200;
     src.connect(filter).connect(gain).connect(this.master);
     src.start(t0);
+  }
+
+  /** Soft-clip curve for a WaveShaper — adds harmonic grit so hits cut through small speakers. */
+  private static distortionCurve(amount: number): Float32Array {
+    const n = 256;
+    const curve = new Float32Array(n);
+    for (let i = 0; i < n; i++) {
+      const x = (i * 2) / n - 1;
+      curve[i] = Math.tanh(amount * x);
+    }
+    return curve;
+  }
+
+  /**
+   * A weighty "power hit": sub-bass thump (felt more than heard on phone
+   * speakers) + a saturated crack transient. Layer this under a pickup's
+   * existing melodic tones to give it real physical impact.
+   */
+  private impact(opts: { vol?: number; delay?: number; punch?: number } = {}) {
+    const ctx = this.ensure();
+    if (!ctx || !this.master || this.muted) return;
+    const { vol = 0.32, delay = 0, punch = 150 } = opts;
+    const t0 = ctx.currentTime + delay;
+
+    // Sub-bass thump — fast pitch drop, driven through soft-clip distortion
+    // so it reads as "powerful" even on speakers that can't reproduce 40Hz.
+    const osc = ctx.createOscillator();
+    const shaper = ctx.createWaveShaper();
+    shaper.curve = SoundEngine.distortionCurve(2.2) as Float32Array<ArrayBuffer>;
+    const gain = ctx.createGain();
+    osc.type = "sine";
+    osc.frequency.setValueAtTime(punch, t0);
+    osc.frequency.exponentialRampToValueAtTime(38, t0 + 0.24);
+    gain.gain.setValueAtTime(0, t0);
+    gain.gain.linearRampToValueAtTime(vol, t0 + 0.008);
+    gain.gain.exponentialRampToValueAtTime(0.001, t0 + 0.28);
+    osc.connect(shaper).connect(gain).connect(this.master);
+    osc.start(t0);
+    osc.stop(t0 + 0.32);
+
+    // Crack transient — a very short filtered noise burst for the "snap".
+    this.noise({ dur: 0.06, vol: vol * 0.7, delay });
+  }
+
+  /**
+   * Energy-charging riser: a sawtooth sweep through a rising bandpass, the
+   * "something big is about to happen" whoosh before a power-up lands.
+   */
+  private riser(opts: { dur?: number; vol?: number; delay?: number } = {}) {
+    const ctx = this.ensure();
+    if (!ctx || !this.master || this.muted) return;
+    const { dur = 0.22, vol = 0.18, delay = 0 } = opts;
+    const t0 = ctx.currentTime + delay;
+    const osc = ctx.createOscillator();
+    const filter = ctx.createBiquadFilter();
+    const gain = ctx.createGain();
+    osc.type = "sawtooth";
+    osc.frequency.setValueAtTime(180, t0);
+    osc.frequency.exponentialRampToValueAtTime(1400, t0 + dur);
+    filter.type = "bandpass";
+    filter.Q.value = 4;
+    filter.frequency.setValueAtTime(300, t0);
+    filter.frequency.exponentialRampToValueAtTime(2200, t0 + dur);
+    gain.gain.setValueAtTime(0, t0);
+    gain.gain.linearRampToValueAtTime(vol, t0 + dur * 0.7);
+    gain.gain.exponentialRampToValueAtTime(0.001, t0 + dur + 0.05);
+    osc.connect(filter).connect(gain).connect(this.master);
+    osc.start(t0);
+    osc.stop(t0 + dur + 0.08);
   }
 
   /**
@@ -661,10 +740,12 @@ class SoundEngine {
         this.noise({ dur: 0.2, vol: 0.18, delay: 0.05 });
         break;
       case "powerUp":
-        this.tone(523, { type: "sawtooth", dur: 0.1, vol: 0.22 });
-        this.tone(784, { type: "sawtooth", dur: 0.1, vol: 0.22, delay: 0.08 });
-        this.tone(1046, { type: "square", dur: 0.12, vol: 0.2, delay: 0.16 });
-        this.tone(1568, { type: "sine", dur: 0.35, vol: 0.22, delay: 0.24 });
+        this.riser({ dur: 0.16, vol: 0.14 });
+        this.impact({ vol: 0.22, delay: 0.16, punch: 130 });
+        this.tone(523, { type: "sawtooth", dur: 0.1, vol: 0.22, delay: 0.16 });
+        this.tone(784, { type: "sawtooth", dur: 0.1, vol: 0.22, delay: 0.24 });
+        this.tone(1046, { type: "square", dur: 0.12, vol: 0.2, delay: 0.32 });
+        this.tone(1568, { type: "sine", dur: 0.35, vol: 0.22, delay: 0.4 });
         break;
       case "satanWarning":
         this.tone(98, { type: "sawtooth", dur: 0.4, vol: 0.3 });
@@ -707,32 +788,42 @@ class SoundEngine {
         this.tone(2217, { type: "sine", dur: 0.08, vol: 0.14, delay: 0.07 });
         break;
       case "sprint":
-        this.noise({ dur: 0.35, vol: 0.2 });
-        this.tone(330, { type: "sawtooth", dur: 0.4, vol: 0.22, slideTo: 990 });
-        this.tone(660, { type: "square", dur: 0.2, vol: 0.14, delay: 0.2, slideTo: 1320 });
+        this.riser({ dur: 0.2, vol: 0.16 });
+        this.impact({ vol: 0.3, delay: 0.2, punch: 160 });
+        this.noise({ dur: 0.35, vol: 0.2, delay: 0.2 });
+        this.tone(330, { type: "sawtooth", dur: 0.4, vol: 0.22, slideTo: 990, delay: 0.2 });
+        this.tone(660, { type: "square", dur: 0.2, vol: 0.14, delay: 0.4, slideTo: 1320 });
         break;
       case "dash":
-        this.noise({ dur: 0.18, vol: 0.22 });
-        this.tone(523, { type: "sine", dur: 0.22, vol: 0.26, slideTo: 1568 });
+        this.riser({ dur: 0.14, vol: 0.16 });
+        this.impact({ vol: 0.32, delay: 0.14, punch: 180 });
+        this.noise({ dur: 0.18, vol: 0.22, delay: 0.14 });
+        this.tone(523, { type: "sine", dur: 0.22, vol: 0.26, slideTo: 1568, delay: 0.14 });
         break;
       case "wave":
-        this.noise({ dur: 0.5, vol: 0.28 });
-        this.tone(440, { type: "sine", dur: 0.45, vol: 0.22, slideTo: 110 });
-        this.tone(880, { type: "triangle", dur: 0.3, vol: 0.12, delay: 0.1, slideTo: 220 });
+        this.riser({ dur: 0.24, vol: 0.16 });
+        this.impact({ vol: 0.34, delay: 0.24, punch: 120 });
+        this.noise({ dur: 0.5, vol: 0.28, delay: 0.24 });
+        this.tone(440, { type: "sine", dur: 0.45, vol: 0.22, slideTo: 110, delay: 0.24 });
+        this.tone(880, { type: "triangle", dur: 0.3, vol: 0.12, delay: 0.34, slideTo: 220 });
         break;
       case "armor":
-        this.tone(392, { type: "square", dur: 0.09, vol: 0.22 });
-        this.tone(523, { type: "square", dur: 0.09, vol: 0.2, delay: 0.08 });
-        this.tone(784, { type: "triangle", dur: 0.25, vol: 0.24, delay: 0.16 });
+        this.riser({ dur: 0.16, vol: 0.14 });
+        this.impact({ vol: 0.3, delay: 0.16, punch: 150 });
+        this.tone(392, { type: "square", dur: 0.09, vol: 0.22, delay: 0.16 });
+        this.tone(523, { type: "square", dur: 0.09, vol: 0.2, delay: 0.24 });
+        this.tone(784, { type: "triangle", dur: 0.25, vol: 0.24, delay: 0.32 });
         break;
       case "surge":
         // Full triumphant fanfare — the biggest pickup in the game.
-        this.tone(523, { type: "sawtooth", dur: 0.14, vol: 0.22 });
-        this.tone(659, { type: "sawtooth", dur: 0.14, vol: 0.22, delay: 0.1 });
-        this.tone(784, { type: "sawtooth", dur: 0.14, vol: 0.22, delay: 0.2 });
-        this.tone(1046, { type: "square", dur: 0.4, vol: 0.24, delay: 0.3 });
-        this.tone(1318, { type: "sine", dur: 0.5, vol: 0.2, delay: 0.4 });
-        this.tone(261, { type: "triangle", dur: 0.7, vol: 0.18, delay: 0.3 });
+        this.riser({ dur: 0.3, vol: 0.2 });
+        this.impact({ vol: 0.4, delay: 0.3, punch: 110 });
+        this.tone(523, { type: "sawtooth", dur: 0.14, vol: 0.22, delay: 0.3 });
+        this.tone(659, { type: "sawtooth", dur: 0.14, vol: 0.22, delay: 0.4 });
+        this.tone(784, { type: "sawtooth", dur: 0.14, vol: 0.22, delay: 0.5 });
+        this.tone(1046, { type: "square", dur: 0.4, vol: 0.24, delay: 0.6 });
+        this.tone(1318, { type: "sine", dur: 0.5, vol: 0.2, delay: 0.7 });
+        this.tone(261, { type: "triangle", dur: 0.7, vol: 0.18, delay: 0.6 });
         break;
       case "spiritOfTheLord":
         // Majestic ascending horn + choir shimmer — weighty but not chaotic.
