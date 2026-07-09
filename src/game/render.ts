@@ -140,6 +140,11 @@ export class Renderer {
   private heroLastLaneX: number | null = null;
   private heroLean = 0;
 
+  // Landing-weight state: tracks the airborne→grounded transition so a
+  // touchdown reads as an impact (squash + dust) instead of just stopping.
+  private heroWasAirborne = false;
+  private heroLandAt = -10;
+
   private updateHeroLean(laneX: number): number {
     const dLane = this.heroLastLaneX === null ? 0 : laneX - this.heroLastLaneX;
     this.heroLastLaneX = laneX;
@@ -1972,6 +1977,12 @@ export class Renderer {
     const runPhase = engine.stats.distance * 1.9;
     const bounce = airborne || slide ? 0 : Math.abs(Math.sin(runPhase)) * 3;
 
+    // Touchdown impact: catch the airborne→grounded transition once per jump.
+    if (this.heroWasAirborne && !airborne) this.heroLandAt = time;
+    this.heroWasAirborne = airborne;
+    const sinceLand = time - this.heroLandAt;
+    const landingSquash = sinceLand >= 0 && sinceLand < 0.16 ? 1 - sinceLand / 0.16 : 0;
+
     ctx.save();
 
     // ---- Holy light: a bright golden-white aura marks the child of God as
@@ -2013,6 +2024,49 @@ export class Renderer {
     ctx.beginPath();
     ctx.ellipse(p.x, p.y + 10, 64 - engine.y * 5, 16, 0, 0, Math.PI * 2);
     ctx.fill();
+
+    // Slide friction streak — a low dust trail kicked up behind the duck,
+    // reading as speed and ground contact rather than a floaty crouch.
+    if (slide) {
+      for (let i = 0; i < 4; i++) {
+        const a = 0.22 * (1 - i / 4);
+        ctx.fillStyle = `rgba(230,220,200,${a})`;
+        ctx.beginPath();
+        ctx.ellipse(p.x, p.y + 9 + i * 2, 26 - i * 3, 4, 0, 0, Math.PI * 2);
+        ctx.fill();
+      }
+    }
+
+    // Footfall dust — a quick puff at each foot-strike beat (twice per stride,
+    // where bounce bottoms out) so the run reads as planted, not floating.
+    if (!airborne && !slide) {
+      const strike = Math.max(0, Math.cos(runPhase * 2));
+      const kick = Math.pow(strike, 10);
+      if (kick > 0.02) {
+        const side = Math.sin(runPhase) > 0 ? 1 : -1;
+        for (let d = 0; d < 3; d++) {
+          ctx.fillStyle = `rgba(255,250,235,${kick * (0.26 - d * 0.07)})`;
+          ctx.beginPath();
+          ctx.ellipse(p.x + side * (9 + d * 4), p.y + 9, 7 - d, 3, 0, 0, Math.PI * 2);
+          ctx.fill();
+        }
+      }
+    }
+    // Landing dust burst — a brief symmetric ring at touchdown.
+    if (landingSquash > 0) {
+      ctx.fillStyle = `rgba(255,250,235,${landingSquash * 0.3})`;
+      for (const side of [-1, 1]) {
+        ctx.beginPath();
+        ctx.ellipse(
+          p.x + side * (12 + (1 - landingSquash) * 16),
+          p.y + 8,
+          8 * (1 - landingSquash * 0.3),
+          3,
+          0, 0, Math.PI * 2,
+        );
+        ctx.fill();
+      }
+    }
 
     // Draw the premium scripture hoverboard beneath the hero's feet.
     this.drawHoverboard(ctx, p.x, baseY + 22, ch, time, engine);
@@ -2114,6 +2168,10 @@ export class Renderer {
       const breath = Math.sin(time * 1.6) * 0.02;
       scaleY += breath;
       scaleX -= breath * 0.5;
+      // Touchdown impact — a fast compress-and-recover so a jump lands with
+      // real weight instead of just resuming the run cycle mid-air.
+      scaleY -= landingSquash * 0.22;
+      scaleX += landingSquash * 0.16;
     }
 
     // ---- Draw character body ----
@@ -2140,7 +2198,7 @@ export class Renderer {
         ? -0.1 // heels-back launch attitude
         : slide
           ? 0.12 // slight dive lean — the 0.7× squash carries the duck read
-          : -0.04 + Math.sin(runPhase) * 0.045; // living run-cycle rock
+          : -0.04 + Math.sin(runPhase) * 0.045 + landingSquash * 0.07; // living run-cycle rock + touchdown dip
       ctx.rotate(tilt + lean);
       ctx.scale(scaleX, scaleY);
       ctx.drawImage(sprite, -spriteW / 2, -spriteH, spriteW, spriteH);
