@@ -10,6 +10,7 @@ import { formatDuration } from '@/lib/format';
 import { track } from '@/lib/analytics';
 import { toMessage } from '@/lib/errors';
 import { backend } from '@/services';
+import { uploadProjectSource } from '@/services/sourceUpload';
 import { useCreateFlowStore } from '@/stores/createFlowStore';
 import { colors, radius, spacing } from '@/theme/tokens';
 
@@ -75,14 +76,23 @@ export default function ReviewStep() {
           durationSec,
         },
       });
+
+      await uploadProjectSource(project.id, {
+        uri: source.uri,
+        fileName: source.fileName,
+        mimeType: source.mimeType,
+        sizeBytes: source.sizeBytes,
+      });
+
       track('project_created', { objective, sourceKind: source.kind });
+      track('source_uploaded', { projectId: project.id, sizeBytes: source.sizeBytes ?? undefined });
       track('processing_started', { projectId: project.id });
       queryClient.invalidateQueries({ queryKey: ['projects'] });
       reset();
       router.replace(`/project/${project.id}/processing`);
     } catch (e) {
       setError(toMessage(e));
-      track('project_failed', { stage: 'create' });
+      track('project_failed', { stage: 'create_or_upload' });
     } finally {
       setSubmitting(false);
     }
