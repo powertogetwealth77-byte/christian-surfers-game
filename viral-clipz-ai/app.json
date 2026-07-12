@@ -1,0 +1,41 @@
+{
+  "expo": {
+    "name": "Viral Clipz AI",
+    "slug": "viral-clipz-ai",
+    "version": "1.0.0",
+    "orientation": "portrait",
+    "icon": "./assets/icon.png",
+    "scheme": "viralclipz",
+    "userInterfaceStyle": "dark",
+    "backgroundColor": "#070B14",
+    "ios": {
+      "supportsTablet": true,
+      "bundleIdentifier": "com.viralclipz.app"
+    },
+    "android": {
+      "package": "com.viralclipz.app",
+      "adaptiveIcon": {
+        "backgroundColor": "#070B14",
+        "foregroundImage": "./assets/android-icon-foreground.png",
+        "backgroundImage": "./assets/android-icon-background.png",
+        "monochromeImage": "./assets/android-icon-monochrome.png"
+      },
+      "predictiveBackGestureEnabled": false
+    },
+    "web": {
+      "favicon": "./assets/favicon.png",
+      "bundler": "metro",
+      "output": "static"
+    },
+    "plugins": [
+      "expo-router",
+      "expo-video",
+      [
+        "expo-image-picker",
+        {
+          "photosPermission": "Viral Clipz AI needs access to your library so you can upload videos to turn into clips."
+        }
+      ]
+    ]
+  }
+}

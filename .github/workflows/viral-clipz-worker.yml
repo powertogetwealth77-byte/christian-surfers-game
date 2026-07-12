@@ -1,0 +1,56 @@
+name: Viral Clipz Worker
+
+on:
+  push:
+    branches:
+      - claude/viral-clipz-ai-build-ml21a3
+    paths:
+      - 'viral-clipz-ai/worker/**'
+      - 'viral-clipz-ai/supabase/**'
+      - '.github/workflows/viral-clipz-worker.yml'
+  pull_request:
+    paths:
+      - 'viral-clipz-ai/worker/**'
+      - 'viral-clipz-ai/supabase/**'
+      - '.github/workflows/viral-clipz-worker.yml'
+
+permissions:
+  contents: read
+
+jobs:
+  worker:
+    runs-on: ubuntu-latest
+    defaults:
+      run:
+        working-directory: viral-clipz-ai/worker
+    steps:
+      - uses: actions/checkout@v4
+      - uses: actions/setup-node@v4
+        with:
+          node-version: 22
+          cache: npm
+          cache-dependency-path: viral-clipz-ai/worker/package.json
+      - name: Install FFmpeg
+        run: sudo apt-get update && sudo apt-get install -y ffmpeg
+        working-directory: .
+      - name: Install dependencies
+        run: npm install
+      - name: Build and test worker
+        id: worker_tests
+        shell: bash
+        run: |
+          set +e
+          npm test 2>&1 | tee worker-test.log
+          status=${PIPESTATUS[0]}
+          echo "exit_code=$status" >> "$GITHUB_OUTPUT"
+          exit 0
+      - name: Upload exact worker test log
+        if: always()
+        uses: actions/upload-artifact@v4
+        with:
+          name: viral-clipz-worker-test-log
+          path: viral-clipz-ai/worker/worker-test.log
+          if-no-files-found: error
+      - name: Fail when worker tests fail
+        if: steps.worker_tests.outputs.exit_code != '0'
+        run: exit 1
