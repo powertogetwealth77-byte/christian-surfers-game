@@ -1,112 +1,91 @@
 import { createClient } from '@supabase/supabase-js';
-import { z } from 'zod';
+import { env } from './config.js';
+import { executePipeline } from './pipeline.js';
+import type { ClaimedJob } from './types.js';
 
-const envSchema = z.object({
-  SUPABASE_URL: z.string().url(),
-  SUPABASE_SERVICE_ROLE_KEY: z.string().min(20),
-  WORKER_ID: z.string().min(1).default(`worker-${process.pid}`),
-  WORKER_POLL_MS: z.coerce.number().int().min(500).default(3000),
-});
-
-const env = envSchema.parse(process.env);
 const db = createClient(env.SUPABASE_URL, env.SUPABASE_SERVICE_ROLE_KEY, {
   auth: { persistSession: false, autoRefreshToken: false },
 });
 
 let shuttingDown = false;
 
-async function updateJob(jobId: string, patch: Record<string, unknown>) {
-  const { error } = await db.from('processing_jobs').update(patch).eq('id', jobId);
-  if (error) throw error;
+const sleep = (milliseconds: number) => new Promise((resolve) => setTimeout(resolve, milliseconds));
+
+function errorCode(error: unknown): string {
+  const message = error instanceof Error ? error.message : String(error);
+  const prefix = message.split(':')[0].trim().toUpperCase().replace(/[^A-Z0-9_]/g, '_');
+  return prefix || 'INTERNAL_ERROR';
 }
 
-async function updateProject(projectId: string, patch: Record<string, unknown>) {
-  const { error } = await db.from('projects').update(patch).eq('id', projectId);
-  if (error) throw error;
+function isPermanent(code: string) {
+  return new Set([
+    'INVALID_SOURCE','PROJECT_NOT_FOUND','MEDIA_CORRUPTED','AUDIO_MISSING',
+    'VIDEO_TOO_LONG','INVALID_MEDIA_TYPE','FILE_TOO_LARGE','UNSUPPORTED_CODEC',
+  ]).has(code);
 }
 
-async function processJob(job: Record<string, any>) {
-  const stages = [
-    ['validate_source', 5],
-    ['inspect_media', 12],
-    ['extract_audio', 20],
-    ['transcribe', 38],
-    ['normalize_transcript', 46],
-    ['generate_candidates', 58],
-    ['analyze_candidates', 68],
-    ['score_candidates', 76],
-    ['select_candidates', 82],
-    ['generate_captions', 88],
-    ['render_previews', 94],
-    ['generate_copy', 97],
-    ['finalize_assets', 99],
-  ] as const;
+async function failJob(job: ClaimedJob, error: unknown) {
+  const message = error instanceof Error ? error.message : String(error);
+  const code = errorCode(error);
+  const retryable = !isPermanent(code) && job.attempt_count < job.maximum_attempts;
+  const terminalStatus = retryable ? 'retrying' : 'dead_letter';
+  const { error: jobError } = await db.from('processing_jobs').update({
+    status: terminalStatus,
+    error_code: code,
+    error_message: message.slice(0, 2000),
+    heartbeat_at: new Date().toISOString(),
+    claimed_by: retryable ? null : env.WORKER_ID,
+  }).eq('id', job.id).eq('claimed_by', env.WORKER_ID);
+  if (jobError) console.error(JSON.stringify({ event: 'job_failure_persist_error', jobId: job.id, message: jobError.message }));
+  if (!retryable) {
+    await db.from('projects').update({ status: 'failed', error_code: code, error_message: message.slice(0, 2000) }).eq('id', job.project_id);
+  }
+  console.error(JSON.stringify({ event: 'job_failed', jobId: job.id, projectId: job.project_id, code, retryable, message }));
+}
 
-  await updateProject(job.project_id, { status: 'processing', error_code: null, error_message: null });
-
+async function processClaimedJob(job: ClaimedJob) {
+  console.log(JSON.stringify({ event: 'job_claimed', jobId: job.id, projectId: job.project_id, attempt: job.attempt_count }));
+  let timer: NodeJS.Timeout | undefined;
   try {
-    for (const [stage, progress] of stages) {
-      if (shuttingDown) throw new Error('WORKER_SHUTDOWN');
-      await updateJob(job.id, {
-        status: 'processing',
-        current_stage: stage,
-        progress_percent: progress,
-        heartbeat_at: new Date().toISOString(),
-        output_payload: { message: stage.replaceAll('_', ' ') },
-      });
-
-      // Launch scaffold: each stage is intentionally explicit. Real ffprobe,
-      // transcription, scoring and FFmpeg adapters plug in here next.
-      await new Promise((resolve) => setTimeout(resolve, 150));
-    }
-
-    await updateJob(job.id, {
-      status: 'completed',
-      current_stage: 'complete',
-      progress_percent: 100,
-      completed_at: new Date().toISOString(),
-      heartbeat_at: new Date().toISOString(),
-      output_payload: { message: 'processing complete', mode: 'pipeline_scaffold' },
+    const timeout = new Promise<never>((_, reject) => {
+      timer = setTimeout(() => reject(new Error('JOB_TIMEOUT')), env.WORKER_JOB_TIMEOUT_MS);
     });
-    await updateProject(job.project_id, { status: 'review_ready', completed_at: new Date().toISOString() });
+    const result = await Promise.race([executePipeline(db, job), timeout]);
+    console.log(JSON.stringify({ event: 'job_completed', jobId: job.id, ...result }));
   } catch (error) {
-    const message = error instanceof Error ? error.message : 'INTERNAL_ERROR';
-    const retryable = job.attempt_count < job.maximum_attempts;
-    await updateJob(job.id, {
-      status: retryable ? 'retrying' : 'dead_letter',
-      error_code: message === 'WORKER_SHUTDOWN' ? 'WORKER_SHUTDOWN' : 'INTERNAL_ERROR',
-      error_message: message,
-      heartbeat_at: new Date().toISOString(),
-    });
-    if (!retryable) await updateProject(job.project_id, { status: 'failed', error_code: 'INTERNAL_ERROR', error_message: message });
+    await failJob(job, error);
+  } finally {
+    if (timer) clearTimeout(timer);
   }
 }
 
-async function claimNextJob() {
+async function claimNextJob(): Promise<ClaimedJob | null> {
   const { data, error } = await db.rpc('claim_next_processing_job', { p_worker_id: env.WORKER_ID });
   if (error) throw error;
-  return data as Record<string, any> | null;
+  return data && typeof data === 'object' && 'id' in data ? data as ClaimedJob : null;
 }
 
 async function main() {
-  console.log(JSON.stringify({ event: 'worker_started', workerId: env.WORKER_ID }));
+  console.log(JSON.stringify({
+    event: 'worker_started',
+    workerId: env.WORKER_ID,
+    transcriptionProvider: env.TRANSCRIPTION_PROVIDER,
+    pollMs: env.WORKER_POLL_MS,
+  }));
   while (!shuttingDown) {
     try {
       const job = await claimNextJob();
-      if (job?.id) {
-        console.log(JSON.stringify({ event: 'job_claimed', jobId: job.id, projectId: job.project_id }));
-        await processJob(job);
-      } else {
-        await new Promise((resolve) => setTimeout(resolve, env.WORKER_POLL_MS));
-      }
+      if (job) await processClaimedJob(job);
+      else await sleep(env.WORKER_POLL_MS);
     } catch (error) {
       console.error(JSON.stringify({ event: 'worker_error', message: error instanceof Error ? error.message : String(error) }));
-      await new Promise((resolve) => setTimeout(resolve, env.WORKER_POLL_MS));
+      await sleep(env.WORKER_POLL_MS);
     }
   }
+  console.log(JSON.stringify({ event: 'worker_stopped', workerId: env.WORKER_ID }));
 }
 
-for (const signal of ['SIGINT', 'SIGTERM'] as const) {
+for (const signal of ['SIGINT','SIGTERM'] as const) {
   process.on(signal, () => {
     shuttingDown = true;
     console.log(JSON.stringify({ event: 'worker_stopping', signal }));
