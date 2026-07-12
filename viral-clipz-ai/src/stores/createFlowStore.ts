@@ -10,7 +10,10 @@ import type { AspectRatio, CaptionStyle, ClipObjective, SourceKind } from '@/typ
 export interface SourceDraft {
   kind: SourceKind;
   url?: string;
+  uri?: string;
   fileName?: string;
+  mimeType?: string;
+  sizeBytes?: number;
   durationSec?: number;
   title: string;
 }
