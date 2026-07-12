@@ -16,9 +16,7 @@ import type {
  *
  * The UI talks only to this interface. In demo mode it is implemented by
  * src/services/demoBackend.ts against local sample data; the production
- * implementation (Prompt 2) will implement the same interface with Supabase
- * queries + edge functions. Server-side code must verify workspace/user
- * ownership itself — the IDs passed from the client are hints, not authority.
+ * implementation uses Supabase with RLS and a trusted media worker.
  */
 
 export interface UsageSummary {
@@ -55,7 +53,10 @@ export interface CreateProjectInput {
   source: {
     kind: 'upload' | 'record' | 'link' | 'youtube' | 'google_drive' | 'dropbox' | 'zoom' | 'riverside';
     url?: string;
+    uri?: string;
     fileName?: string;
+    mimeType?: string;
+    sizeBytes?: number;
     durationSec?: number;
   };
 }
@@ -69,8 +70,8 @@ export interface Backend {
   retryProject(projectId: string): Promise<Project>;
   archiveProject(projectId: string): Promise<void>;
 
-  // Processing job status — poll-friendly; production swaps in Supabase
-  // Realtime without changing consumers.
+  // Processing job status — poll-friendly; production may swap in Realtime
+  // without changing consumers.
   getJob(projectId: string): Promise<ProcessingJob | null>;
 
   // Clips
