@@ -36,4 +36,21 @@ jobs:
       - name: Install dependencies
         run: npm install
       - name: Build and test worker
-        run: npm test
+        id: worker_tests
+        shell: bash
+        run: |
+          set +e
+          npm test 2>&1 | tee worker-test.log
+          status=${PIPESTATUS[0]}
+          echo "exit_code=$status" >> "$GITHUB_OUTPUT"
+          exit 0
+      - name: Upload exact worker test log
+        if: always()
+        uses: actions/upload-artifact@v4
+        with:
+          name: viral-clipz-worker-test-log
+          path: viral-clipz-ai/worker/worker-test.log
+          if-no-files-found: error
+      - name: Fail when worker tests fail
+        if: steps.worker_tests.outputs.exit_code != '0'
+        run: exit 1
