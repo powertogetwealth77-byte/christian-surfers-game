@@ -1,15 +1,17 @@
+import { isDemoMode } from '@/lib/env';
 import { demoBackend } from '@/services/demoBackend';
+import { supabaseBackend } from '@/services/supabaseBackend';
 import type { Backend } from '@/services/backend';
 
 /**
- * Active backend implementation.
+ * One explicit backend seam for the entire application.
  *
- * Auth is real whenever Supabase credentials exist (see stores/authStore).
- * Data services intentionally remain on the demo implementation until the
- * production Supabase schema + edge functions ship (Prompt 2): we do not
- * fake a working backend. Swap `demoBackend` for `supabaseBackend` here
- * once it exists — no screen code changes required.
+ * - Missing Supabase public configuration => clearly labelled Demo Mode.
+ * - Valid Supabase public configuration => production adapter with RLS.
+ *
+ * Production never silently falls back after initialization: failures from the
+ * Supabase adapter are surfaced to the existing loading/error/retry states.
  */
-export const backend: Backend = demoBackend;
+export const backend: Backend = isDemoMode ? demoBackend : supabaseBackend;
 
 export type { AnalyticsSummary, Backend, CreateProjectInput, UsageSummary } from '@/services/backend';
