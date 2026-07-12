@@ -35,24 +35,25 @@ interface SourceOption {
 const OPTIONS: SourceOption[] = [
   { kind: 'upload', label: 'Upload from device', hint: 'Pick a video from your library', icon: Upload, ready: true },
   { kind: 'record', label: 'Record video', hint: 'Capture directly with your camera', icon: Camera, ready: true },
-  { kind: 'link', label: 'Paste video link', hint: 'Any direct video URL', icon: Link2, ready: true },
-  { kind: 'youtube', label: 'Import from YouTube', hint: 'Paste a video URL', icon: MonitorPlay, ready: true },
+  { kind: 'link', label: 'Paste video link', hint: 'Direct-link ingestion is coming next', icon: Link2, ready: false },
+  { kind: 'youtube', label: 'Import from YouTube', hint: 'YouTube ingestion is coming next', icon: MonitorPlay, ready: false },
   { kind: 'google_drive', label: 'Google Drive', hint: 'Connect to import from Drive', icon: FolderDown, ready: false },
   { kind: 'dropbox', label: 'Dropbox', hint: 'Connect to import from Dropbox', icon: CloudDownload, ready: false },
   { kind: 'zoom', label: 'Zoom', hint: 'Connect to import recordings', icon: Video, ready: false },
   { kind: 'riverside', label: 'Riverside', hint: 'Connect to import studio sessions', icon: Mic2, ready: false },
 ];
 
-const LINK_KINDS: SourceKind[] = ['link', 'youtube'];
-
 export default function SourceStep() {
   const router = useRouter();
   const source = useCreateFlowStore((s) => s.source);
   const setSource = useCreateFlowStore((s) => s.setSource);
   const [selected, setSelected] = useState<SourceKind | null>(source?.kind ?? null);
-  const [url, setUrl] = useState(source?.url ?? '');
   const [title, setTitle] = useState(source?.title ?? '');
   const [fileName, setFileName] = useState<string | null>(source?.fileName ?? null);
+  const [uri, setUri] = useState<string | null>(source?.uri ?? null);
+  const [mimeType, setMimeType] = useState<string | null>(source?.mimeType ?? null);
+  const [sizeBytes, setSizeBytes] = useState<number | null>(source?.sizeBytes ?? null);
+  const [durationSec, setDurationSec] = useState<number | null>(source?.durationSec ?? null);
   const [permissionDenied, setPermissionDenied] = useState(false);
   const [error, setError] = useState<string | null>(null);
 
@@ -67,12 +68,17 @@ export default function SourceStep() {
       return;
     }
     const result = fromCamera
-      ? await ImagePicker.launchCameraAsync({ mediaTypes: ['videos'] })
-      : await ImagePicker.launchImageLibraryAsync({ mediaTypes: ['videos'] });
+      ? await ImagePicker.launchCameraAsync({ mediaTypes: ['videos'], quality: 1 })
+      : await ImagePicker.launchImageLibraryAsync({ mediaTypes: ['videos'], quality: 1 });
     if (!result.canceled && result.assets[0]) {
       const asset = result.assets[0];
-      setFileName(asset.fileName ?? 'video selected');
-      if (!title && asset.fileName) setTitle(asset.fileName.replace(/\.[^.]+$/, ''));
+      const nextFileName = asset.fileName ?? `video-${Date.now()}.mp4`;
+      setFileName(nextFileName);
+      setUri(asset.uri);
+      setMimeType(asset.mimeType ?? 'video/mp4');
+      setSizeBytes(asset.fileSize ?? null);
+      setDurationSec(asset.duration ? Math.max(1, Math.round(asset.duration / 1000)) : null);
+      if (!title) setTitle(nextFileName.replace(/\.[^.]+$/, ''));
       setSelected(fromCamera ? 'record' : 'upload');
     }
   };
@@ -83,36 +89,26 @@ export default function SourceStep() {
       setSelected(opt.kind);
       return;
     }
-    if (opt.kind === 'upload') pickVideo(false);
-    else if (opt.kind === 'record') pickVideo(true);
-    else setSelected(opt.kind);
+    if (opt.kind === 'upload') void pickVideo(false);
+    else if (opt.kind === 'record') void pickVideo(true);
   };
 
   const selectedOption = OPTIONS.find((o) => o.kind === selected);
-  const needsUrl = selected ? LINK_KINDS.includes(selected) : false;
   const integrationPending = selectedOption ? !selectedOption.ready : false;
-
-  const canContinue =
-    !!selected &&
-    !integrationPending &&
-    title.trim().length > 0 &&
-    (needsUrl ? /^https?:\/\/.+/.test(url.trim()) : !!fileName || needsUrl === false);
+  const canContinue = Boolean(selected && !integrationPending && title.trim() && uri && fileName);
 
   const onNext = () => {
-    if (!selected) return;
-    if (needsUrl && !/^https?:\/\/.+/.test(url.trim())) {
-      setError('Enter a valid link starting with http(s)://');
-      return;
-    }
+    if (!selected || !uri || !fileName) return;
     setSource({
       kind: selected,
-      url: needsUrl ? url.trim() : undefined,
-      fileName: fileName ?? undefined,
+      uri,
+      fileName,
+      mimeType: mimeType ?? 'video/mp4',
+      sizeBytes: sizeBytes ?? undefined,
+      durationSec: durationSec ?? undefined,
       title: title.trim(),
-      // Demo assumption until real media probing exists server-side.
-      durationSec: 1800,
     });
-    track('source_added', { kind: selected });
+    track('source_added', { kind: selected, sizeBytes: sizeBytes ?? undefined });
     router.push('/create/outcome');
   };
 
@@ -138,9 +134,7 @@ export default function SourceStep() {
               <opt.icon size={22} color={selected === opt.kind ? colors.primary : colors.textSecondary} />
               <View style={{ flex: 1 }}>
                 <AppText variant="bodyBold">{opt.label}</AppText>
-                <AppText variant="caption" tone="muted">
-                  {opt.hint}
-                </AppText>
+                <AppText variant="caption" tone="muted">{opt.hint}</AppText>
               </View>
               {!opt.ready ? <Badge label="Connect soon" tone="accent" /> : null}
             </View>
@@ -156,11 +150,9 @@ export default function SourceStep() {
 
         {integrationPending && selectedOption ? (
           <Card>
-            <AppText variant="bodyBold" tone="accent">
-              {selectedOption.label} integration is on the roadmap
-            </AppText>
+            <AppText variant="bodyBold" tone="accent">{selectedOption.label} integration is on the roadmap</AppText>
             <AppText variant="caption" tone="secondary" style={{ marginTop: spacing.xs }}>
-              This connector isn’t live yet — nothing here pretends to import. Use upload or a link for now.
+              This connector is not live yet. Use device upload or recording for the production MVP.
             </AppText>
           </Card>
         ) : null}
@@ -168,22 +160,13 @@ export default function SourceStep() {
         {fileName ? (
           <View style={{ flexDirection: 'row', alignItems: 'center', gap: spacing.sm }}>
             <FileVideo size={16} color={colors.success} />
-            <AppText variant="caption" tone="success">
-              {fileName}
-            </AppText>
+            <View style={{ flex: 1 }}>
+              <AppText variant="caption" tone="success">{fileName}</AppText>
+              {sizeBytes ? (
+                <AppText variant="caption" tone="muted">{(sizeBytes / 1024 / 1024).toFixed(1)} MB</AppText>
+              ) : null}
+            </View>
           </View>
-        ) : null}
-
-        {needsUrl ? (
-          <Input
-            label="Video link"
-            placeholder="https://…"
-            autoCapitalize="none"
-            keyboardType="url"
-            value={url}
-            onChangeText={setUrl}
-            error={error ?? undefined}
-          />
         ) : null}
 
         {selected && !integrationPending ? (
@@ -192,6 +175,7 @@ export default function SourceStep() {
             placeholder="e.g. Podcast Ep. 43 — Hiring Lessons"
             value={title}
             onChangeText={setTitle}
+            error={error ?? undefined}
           />
         ) : null}
       </View>
