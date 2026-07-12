@@ -63,6 +63,7 @@ export interface ClipCandidate {
 export interface ProjectContext {
   id: string;
   workspaceId: string;
+  createdBy: string;
   objective: string;
   title: string;
   settings: Record<string, any>;
