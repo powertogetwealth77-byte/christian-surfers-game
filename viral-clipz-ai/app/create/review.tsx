@@ -17,12 +17,8 @@ function ReviewRow({ icon, label, value }: { icon: React.ReactNode; label: strin
   return (
     <View style={{ flexDirection: 'row', alignItems: 'center', gap: spacing.md, paddingVertical: spacing.sm }}>
       {icon}
-      <AppText variant="caption" tone="muted" style={{ width: 110 }}>
-        {label}
-      </AppText>
-      <AppText variant="bodyBold" style={{ flex: 1 }} numberOfLines={2}>
-        {value}
-      </AppText>
+      <AppText variant="caption" tone="muted" style={{ width: 110 }}>{label}</AppText>
+      <AppText variant="bodyBold" style={{ flex: 1 }} numberOfLines={2}>{value}</AppText>
     </View>
   );
 }
@@ -69,7 +65,15 @@ export default function ReviewStep() {
             }
           : null,
         config,
-        source: { kind: source.kind, url: source.url, fileName: source.fileName, durationSec },
+        source: {
+          kind: source.kind,
+          url: source.url,
+          uri: source.uri,
+          fileName: source.fileName,
+          mimeType: source.mimeType,
+          sizeBytes: source.sizeBytes,
+          durationSec,
+        },
       });
       track('project_created', { objective, sourceKind: source.kind });
       track('processing_started', { projectId: project.id });
@@ -97,7 +101,7 @@ export default function ReviewStep() {
       step={5}
       title="Review & generate"
       subtitle="Double-check the brief — this is what the AI optimizes against."
-      nextLabel="Generate clips"
+      nextLabel="Upload & generate clips"
       nextLoading={submitting}
       onNext={onGenerate}
     >
@@ -118,7 +122,7 @@ export default function ReviewStep() {
           <View style={{ padding: spacing.lg }}>
             <AppText variant="h3">{source.title}</AppText>
             <AppText variant="caption" tone="muted" style={{ marginTop: spacing.xs }}>
-              {source.kind === 'upload' || source.kind === 'record' ? source.fileName ?? 'Device video' : source.url}
+              {source.fileName ?? source.url ?? 'Device video'}
             </AppText>
           </View>
         </Card>
@@ -126,20 +130,16 @@ export default function ReviewStep() {
         <Card>
           <ReviewRow icon={<Clock3 size={18} color={colors.textSecondary} />} label="Duration" value={`≈ ${formatDuration(durationSec)}`} />
           <ReviewRow icon={<Target size={18} color={colors.textSecondary} />} label="Objective" value={OBJECTIVE_LABELS[objective]} />
-          <ReviewRow
-            icon={<Users size={18} color={colors.textSecondary} />}
-            label="Audience"
-            value={audience.targetAudience || 'Not specified — AI will infer from content'}
-          />
+          <ReviewRow icon={<Users size={18} color={colors.textSecondary} />} label="Audience" value={audience.targetAudience || 'Not specified — AI will infer from content'} />
           <ReviewRow icon={<Clapperboard size={18} color={colors.textSecondary} />} label="Expected clips" value={expectedClips} />
           <ReviewRow icon={<Coins size={18} color={colors.textSecondary} />} label="Credit usage" value={`≈ ${estimatedMinutes} processing minutes`} />
         </Card>
 
-        {error ? (
-          <AppText variant="caption" tone="danger" accessibilityLiveRegion="assertive">
-            {error}
-          </AppText>
-        ) : null}
+        <AppText variant="caption" tone="muted">
+          Keep the app open while the source uploads. After upload completes, processing continues in the background.
+        </AppText>
+
+        {error ? <AppText variant="caption" tone="danger" accessibilityLiveRegion="assertive">{error}</AppText> : null}
       </View>
     </CreateStep>
   );
