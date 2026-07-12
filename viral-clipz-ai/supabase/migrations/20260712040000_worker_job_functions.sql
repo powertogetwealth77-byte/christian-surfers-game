@@ -6,10 +6,8 @@ language plpgsql
 security definer
 set search_path=public
 as $$
-declare v_job public.processing_jobs;
+declare
+  v_job public.processing_jobs;
 begin
-  select * into v_job
-  from public.processing_jobs
-  where status in ('queued','retrying')
-    and attempt_count < maximum_attempts
-  order by created_at
+  if coalesce(trim(p_worker_id), '') = '' then
+    raise exception 'WORKER_ID_REQUIRED';
